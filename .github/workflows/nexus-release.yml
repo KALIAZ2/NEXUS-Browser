@@ -44,7 +44,9 @@ jobs:
           cache: "gradle"
 
       - name: 3. Configuration du SDK Android
-        uses: android-actions/setup-android@v3
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
 
       - name: 4. Restauration sécurisée de la clé de signature Android
         env:
@@ -62,6 +64,7 @@ jobs:
       - name: 5. Extraction des informations de version du projet
         id: version_info
         run: |
+          sed -i 's/\r$//' gradlew
           chmod +x gradlew
           VERSION_NAME=$(grep -m1 'versionName = ' app/build.gradle.kts | sed -E 's/.*"([^"]+)".*/\1/')
           VERSION_CODE=$(grep -m1 'versionCode = ' app/build.gradle.kts | sed -E 's/[^0-9]*([0-9]+).*/\1/')
