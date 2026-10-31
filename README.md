@@ -83,7 +83,7 @@ Sur votre smartphone Android, ouvrez **NEXUS Browser → Paramètres → À prop
 Le fichier **`NEXUS.apk`** (ainsi que **`NEXUS-release.apk`**) à la racine du projet est prêt à être installé sur votre smartphone Android (Samsung Galaxy ou tout appareil ARM64 sous Android 8.0+) :
 
 1. **Via Quick Share (Samsung / Windows)** :
-   - Faites un clic droit sur `C:\Users\wakan\.gemini\antigravity\scratch\NEXUS\NEXUS.apk` → **Partager** → **Quick Share** (ou glissez-déposez le fichier dans l'application *Quick Share* sur Windows).
+   - Faites un clic droit sur `NEXUS\NEXUS.apk` → **Partager** → **Quick Share** (ou glissez-déposez le fichier dans l'application *Quick Share* sur Windows).
    - Acceptez la réception sur votre smartphone, appuyez sur le fichier reçu dans *Mes Fichiers* (`Téléchargements` / `Quick Share`) et lancez l'installation.
 2. **Via câble USB (ADB)** :
    ```powershell
