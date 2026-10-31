@@ -19,7 +19,36 @@ data class TabEntity(
     val isActive: Boolean = false,
     val position: Int = 0,
     val lastAccessedAt: Long = System.currentTimeMillis(),
-    val sessionStateJson: String? = null
+    val sessionStateJson: String? = null,
+    val windowId: String = "window_main",
+    val groupId: String? = null,
+    val previewPath: String? = null,
+    val isPinned: Boolean = false
+)
+
+@Immutable
+@Entity(
+    tableName = "tab_groups",
+    indices = [Index(value = ["windowId"])]
+)
+data class TabGroupEntity(
+    @PrimaryKey val id: String,
+    val name: String,
+    val colorHex: String,
+    val windowId: String = "window_main",
+    val createdAt: Long = System.currentTimeMillis()
+)
+
+@Immutable
+@Entity(
+    tableName = "browser_windows",
+    indices = [Index(value = ["createdAt"])]
+)
+data class BrowserWindowEntity(
+    @PrimaryKey val id: String,
+    val name: String,
+    val isPrivate: Boolean = false,
+    val createdAt: Long = System.currentTimeMillis()
 )
 
 @Immutable

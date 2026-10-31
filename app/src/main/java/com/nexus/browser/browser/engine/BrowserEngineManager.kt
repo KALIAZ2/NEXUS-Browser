@@ -41,6 +41,7 @@ interface SessionEventListener {
     fun onSessionStateUpdated(tabId: String, sessionStateJson: String)
     fun onOpenNewTabRequested(sourceTabId: String, targetUrl: String, isPrivate: Boolean)
     fun onLoadError(tabId: String, failingUrl: String, errorDescription: String)
+    fun onScrollStateChanged(tabId: String, canScrollToTop: Boolean) {}
 }
 
 @Singleton
@@ -63,6 +64,7 @@ class BrowserEngineManager @Inject constructor(
     private val sessions = ConcurrentHashMap<String, GeckoSession>()
     private val sessionPrivacyMap = ConcurrentHashMap<String, Boolean>()
     private val sessionLastUsedMap = ConcurrentHashMap<String, Long>()
+    private val sessionCanScrollTopMap = ConcurrentHashMap<String, Boolean>()
 
     @Volatile
     private var currentActiveTabId: String? = null
@@ -324,6 +326,21 @@ class BrowserEngineManager @Inject constructor(
             }
         }
 
+        session.scrollDelegate = object : GeckoSession.ScrollDelegate {
+            override fun onScrollChanged(session: GeckoSession, scrollX: Int, scrollY: Int) {
+                val previous = sessionCanScrollTopMap[tabId] ?: false
+                val shouldShow = when {
+                    scrollY > 520 -> true
+                    scrollY < 160 -> false
+                    else -> previous
+                }
+                if (shouldShow != previous) {
+                    sessionCanScrollTopMap[tabId] = shouldShow
+                    eventListener?.onScrollStateChanged(tabId, shouldShow)
+                }
+            }
+        }
+
         session.permissionDelegate = permissionManager
     }
 
@@ -399,6 +416,15 @@ class BrowserEngineManager @Inject constructor(
         sessions[tabId]?.finder?.clear()
     }
 
+    override fun scrollToTop(tabId: String) {
+        val session = sessions[tabId] ?: return
+        runCatching {
+            session.loadUri("javascript:window.scrollTo({top:0,behavior:'smooth'})")
+        }
+        sessionCanScrollTopMap[tabId] = false
+        eventListener?.onScrollStateChanged(tabId, false)
+    }
+
     override fun exitFullScreen(tabId: String) {
         sessions[tabId]?.exitFullScreen()
     }
@@ -419,6 +445,7 @@ class BrowserEngineManager @Inject constructor(
     override fun closeSession(tabId: String) {
         sessionPrivacyMap.remove(tabId)
         sessionLastUsedMap.remove(tabId)
+        sessionCanScrollTopMap.remove(tabId)
         sessions.remove(tabId)?.let { session ->
             runCatching {
                 session.setActive(false)
@@ -485,70 +512,102 @@ class BrowserEngineManager @Inject constructor(
             <head>
               <meta charset="utf-8" />
               <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-              <title>Erreur de navigation — NEXUS</title>
+              <title>Connexion interrompue — NEXUS Browser</title>
               <style>
+                :root {
+                  --bg: #050816;
+                  --card: #0D152C;
+                  --border: #1E2D52;
+                  --text: #F5F8FF;
+                  --muted: #94A3B8;
+                  --url-bg: #080E20;
+                  --accent: #2979FF;
+                  --danger: #FF5964;
+                }
+                @media (prefers-color-scheme: light) {
+                  :root {
+                    --bg: #F5F7FC;
+                    --card: #FFFFFF;
+                    --border: #D8E2F0;
+                    --text: #0F172A;
+                    --muted: #64748B;
+                    --url-bg: #EDF2FA;
+                    --accent: #2563EB;
+                    --danger: #E11D48;
+                  }
+                }
                 body {
-                  background: #090B10;
-                  color: #F5F7FC;
+                  background: var(--bg);
+                  color: var(--text);
                   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-                  padding: 32px 20px;
+                  padding: 28px 18px;
                   margin: 0;
                   display: flex;
                   flex-direction: column;
                   align-items: center;
                   justify-content: center;
-                  min-height: 80vh;
+                  min-height: 82vh;
                 }
                 .card {
-                  background: #11151D;
-                  border: 1px solid #252C38;
-                  border-radius: 18px;
-                  padding: 24px;
+                  background: var(--card);
+                  border: 1px solid var(--border);
+                  border-radius: 20px;
+                  padding: 26px 22px;
                   max-width: 440px;
                   width: 100%;
                   box-sizing: border-box;
+                  box-shadow: 0 12px 32px rgba(0,0,0,0.22);
                 }
                 .badge {
                   display: inline-block;
-                  background: rgba(255, 89, 100, 0.15);
-                  color: #FF5964;
-                  font-weight: 600;
-                  font-size: 12px;
-                  padding: 4px 10px;
+                  background: rgba(255, 89, 100, 0.14);
+                  color: var(--danger);
+                  font-weight: 700;
+                  font-size: 11px;
+                  letter-spacing: 0.6px;
+                  padding: 5px 11px;
                   border-radius: 99px;
-                  margin-bottom: 12px;
+                  margin-bottom: 14px;
                 }
-                h1 { font-size: 20px; margin: 0 0 10px 0; }
-                p { color: #929BAA; font-size: 14px; line-height: 1.5; margin: 0 0 16px 0; }
+                h1 { font-size: 20px; margin: 0 0 10px 0; font-weight: 700; }
+                p { color: var(--muted); font-size: 14px; line-height: 1.55; margin: 0 0 16px 0; }
                 .url {
                   font-family: monospace;
                   font-size: 12px;
-                  color: #7C9EFF;
+                  color: var(--accent);
                   word-break: break-all;
-                  background: #191F2A;
-                  padding: 10px;
-                  border-radius: 10px;
+                  background: var(--url-bg);
+                  border: 1px solid var(--border);
+                  padding: 10px 12px;
+                  border-radius: 12px;
                   margin-bottom: 18px;
                 }
+                .actions {
+                  display: flex;
+                  gap: 10px;
+                }
                 button {
-                  background: #5685FF;
+                  background: linear-gradient(135deg, #00E5FF 0%, #2563EB 55%, #7C3AED 100%);
                   color: #FFFFFF;
                   border: none;
-                  border-radius: 10px;
-                  padding: 12px 18px;
+                  border-radius: 12px;
+                  padding: 13px 18px;
                   font-weight: 600;
                   width: 100%;
                   font-size: 14px;
+                  cursor: pointer;
                 }
               </style>
             </head>
             <body>
               <div class="card">
-                <span class="badge">PROTECTION NEXUS</span>
-                <h1>Chargement interrompu</h1>
+                <span class="badge">DIAGNOSTIC RÉSEAU NEXUS</span>
+                <h1>Impossible d'ouvrir cette page</h1>
                 <p>$message</p>
                 <div class="url">$url</div>
-                <button onclick="window.location.reload()">Réessayer</button>
+                <div class="actions">
+                  <button onclick="window.location.reload()">Réessayer maintenant</button>
+                </div>
               </div>
             </body>
             </html>

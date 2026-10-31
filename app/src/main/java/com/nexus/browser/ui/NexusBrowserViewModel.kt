@@ -13,6 +13,10 @@ import com.nexus.browser.browser.engine.BrowserEngineManager
 import com.nexus.browser.browser.engine.SessionEventListener
 import com.nexus.browser.browser.permissions.SitePermissionManager
 import com.nexus.browser.browser.tabs.BrowserTab
+import com.nexus.browser.browser.tabs.BrowserWindow
+import com.nexus.browser.browser.tabs.ClosedBrowserWindow
+import com.nexus.browser.browser.tabs.ClosedTabGroup
+import com.nexus.browser.browser.tabs.TabGroup
 import com.nexus.browser.browser.tabs.TabRepository
 import com.nexus.browser.browser.toolbar.AddressSuggestion
 import com.nexus.browser.browser.toolbar.AddressSuggestionProvider
@@ -21,6 +25,7 @@ import com.nexus.browser.browser.tools.PageTranslator
 import com.nexus.browser.browser.tools.ReaderModeArticle
 import com.nexus.browser.browser.tools.ReaderModeExtractor
 import com.nexus.browser.browser.tools.ReaderModeResult
+import com.nexus.browser.core.common.SearchEngine
 import com.nexus.browser.core.common.UrlUtils
 import com.nexus.browser.core.database.BookmarkEntity
 import com.nexus.browser.core.database.DownloadEntity
@@ -30,6 +35,7 @@ import com.nexus.browser.core.database.HomeShortcutEntity
 import com.nexus.browser.core.database.SitePermissionEntity
 import com.nexus.browser.core.preferences.NexusPreferencesRepository
 import com.nexus.browser.core.preferences.NexusSettingsState
+import com.nexus.browser.core.security.SecurityPolicy
 import com.nexus.browser.extensions.compatibility.ExtensionCompatibilityReport
 import com.nexus.browser.extensions.manager.NexusExtensionManager
 import com.nexus.browser.extensions.store.ExtensionStoreCategory
@@ -93,6 +99,18 @@ class NexusBrowserViewModel @Inject constructor(
     val tabs: StateFlow<List<BrowserTab>> = tabRepository.tabs
     val activeTabId: StateFlow<String?> = tabRepository.activeTabId
     val recentlyClosedTabs: StateFlow<List<BrowserTab>> = tabRepository.recentlyClosedTabs
+
+    // Gestion multi-fenêtres et groupes d'onglets
+    val windows: StateFlow<List<BrowserWindow>> = tabRepository.windows
+    val activeWindowId: StateFlow<String> = tabRepository.activeWindowId
+    val tabGroups: StateFlow<List<TabGroup>> = tabRepository.tabGroups
+    val closedTabGroups: StateFlow<List<ClosedTabGroup>> = tabRepository.closedTabGroups
+    val closedWindows: StateFlow<List<ClosedBrowserWindow>> = tabRepository.closedWindows
+
+    // Bannière interactive d'annulation (Undo) pour onglet / groupe fermé
+    private val _undoBannerMessage = MutableStateFlow<String?>(null)
+    val undoBannerMessage: StateFlow<String?> = _undoBannerMessage.asStateFlow()
+    private var lastClosedAction: (() -> Unit)? = null
 
     val activeTab: StateFlow<BrowserTab?> = combine(tabs, activeTabId) { list, activeId ->
         list.firstOrNull { it.id == activeId } ?: list.firstOrNull()
@@ -184,22 +202,50 @@ class NexusBrowserViewModel @Inject constructor(
     }
 
     fun onAddressQueryChanged(query: String) {
-        if (!settings.value.addressBarSuggestions || query.isBlank()) {
+        if (!settings.value.addressBarSuggestions) {
             _addressSuggestions.value = emptyList()
         } else {
             _addressSuggestions.value = suggestionProvider.getSuggestions(
                 rawQuery = query,
                 searchEngine = settings.value.searchEngine,
                 bookmarks = bookmarks.value,
-                history = history.value
+                history = history.value,
+                recentSearches = settings.value.recentSearches
+            )
+        }
+    }
+
+    fun onAddressBarFocused(currentText: String) {
+        if (!settings.value.addressBarSuggestions) {
+            _addressSuggestions.value = emptyList()
+        } else {
+            _addressSuggestions.value = suggestionProvider.getSuggestions(
+                rawQuery = currentText,
+                searchEngine = settings.value.searchEngine,
+                bookmarks = bookmarks.value,
+                history = history.value,
+                recentSearches = settings.value.recentSearches
             )
         }
     }
 
     fun navigateToInput(rawInput: String) {
+        val trimmed = rawInput.trim()
+        if (trimmed.isEmpty()) return
+
         val currentSettings = settings.value
+        val isLikely = UrlUtils.isLikelyUrl(trimmed)
+
+        // Enregistrer dans les recherches récentes si ce n'est pas une URL pure et que l'onglet n'est pas privé
+        val isPriv = activeTab.value?.isPrivate == true
+        if (!isLikely && !isPriv) {
+            viewModelScope.launch {
+                preferencesRepository.recordRecentSearch(trimmed)
+            }
+        }
+
         val targetUrl = UrlUtils.normalizeInputToUrlOrSearch(
-            rawInput = rawInput,
+            rawInput = trimmed,
             searchEngine = currentSettings.searchEngine,
             httpsOnlyMode = currentSettings.httpsOnlyMode
         )
@@ -220,7 +266,9 @@ class NexusBrowserViewModel @Inject constructor(
             it.copy(
                 url = targetUrl,
                 title = if (UrlUtils.isHomeUrl(targetUrl)) "Nouvel onglet" else UrlUtils.extractHost(targetUrl),
-                errorDescription = null
+                errorDescription = null,
+                lastWebUrlBeforeHome = null,
+                canScrollToTop = false
             )
         }
 
@@ -238,13 +286,19 @@ class NexusBrowserViewModel @Inject constructor(
         if (_findInPageState.value.isVisible) {
             closeFindInPage()
         }
+
+        // Sauvegarder la dernière URL web avant de revenir à l'accueil pour permettre un "Avancer" fluide
+        val previousWebUrl = tab.url.takeIf { !UrlUtils.isHomeUrl(it) }
+
         tabRepository.updateTab(tab.id) {
             it.copy(
                 url = homeUrl,
                 title = "Nouvel onglet",
                 isLoading = false,
                 progress = 100,
-                errorDescription = null
+                errorDescription = null,
+                lastWebUrlBeforeHome = previousWebUrl,
+                canScrollToTop = false
             )
         }
         if (!UrlUtils.isHomeUrl(homeUrl)) {
@@ -279,9 +333,28 @@ class NexusBrowserViewModel @Inject constructor(
 
     fun goForward() {
         val tab = activeTab.value ?: return
+        // Si l'utilisateur est sur l'accueil et avait précédemment une page web, rouvrir cette page
+        if (tab.isHomeTab && !tab.lastWebUrlBeforeHome.isNullOrBlank()) {
+            val target = tab.lastWebUrlBeforeHome
+            tabRepository.updateTab(tab.id) {
+                it.copy(
+                    url = target,
+                    title = UrlUtils.extractHost(target),
+                    lastWebUrlBeforeHome = null
+                )
+            }
+            engineManager.loadUrl(tab.id, target)
+            return
+        }
+
         if (tab.canGoForward) {
             engineManager.goForward(tab.id)
         }
+    }
+
+    fun scrollToTop() {
+        val tab = activeTab.value ?: return
+        engineManager.scrollToTop(tab.id)
     }
 
     fun reloadOrStop() {
@@ -507,14 +580,60 @@ class NexusBrowserViewModel @Inject constructor(
         }
     }
 
-    // --- Tabs & Sessions ---
+    // --- Cache et miniatures des onglets ---
 
-    fun createNewTab(url: String = settings.value.homePageUrl, isPrivate: Boolean = false) {
+    fun cacheTabPreview(bitmap: Bitmap) {
+        val currentId = activeTab.value?.id ?: return
+        cacheTabPreview(currentId, bitmap)
+    }
+
+    fun cacheTabPreview(tabId: String, bitmap: Bitmap) {
+        viewModelScope.launch {
+            val path = pageCaptureManager.saveTabPreviewBitmap(tabId, bitmap)
+            if (path != null) {
+                tabRepository.updateTab(tabId) { it.copy(previewPath = path) }
+            }
+        }
+    }
+
+    fun getCachedTabPreview(tabId: String, previewPath: String?): Bitmap? {
+        return pageCaptureManager.getCachedTabPreview(tabId, previewPath)
+    }
+
+    // --- Gestion interactive de l'annulation (Undo Banner) ---
+
+    fun triggerUndoAction(message: String, undoAction: () -> Unit) {
+        lastClosedAction = undoAction
+        _undoBannerMessage.value = message
+    }
+
+    fun performUndoClose() {
+        lastClosedAction?.invoke()
+        lastClosedAction = null
+        _undoBannerMessage.value = null
+    }
+
+    fun dismissUndoBanner() {
+        lastClosedAction = null
+        _undoBannerMessage.value = null
+    }
+
+    // --- Sessions, Onglets, Groupes et Fenêtres ---
+
+    fun createNewTab(
+        url: String = settings.value.homePageUrl,
+        isPrivate: Boolean = false,
+        windowId: String? = null,
+        groupId: String? = null
+    ) {
+        val targetWindowId = windowId ?: activeWindowId.value
         val newTab = tabRepository.createTab(
             url = url,
             isPrivate = isPrivate,
             select = true,
-            isDesktopMode = settings.value.desktopModeDefault
+            isDesktopMode = settings.value.desktopModeDefault,
+            windowId = targetWindowId,
+            groupId = groupId
         )
         engineManager.setActiveSession(newTab.id)
     }
@@ -537,11 +656,29 @@ class NexusBrowserViewModel @Inject constructor(
         tabRepository.reorderTab(tabId, moveUp)
     }
 
+    fun togglePinTab(tabId: String) {
+        val isNowPinned = tabRepository.togglePinTab(tabId)
+        showBanner(if (isNowPinned) "Onglet épinglé" else "Onglet désépinglé")
+    }
+
+    fun switchAdjacentTab(direction: Int) {
+        val nextTab = tabRepository.switchAdjacentTab(direction)
+        if (nextTab != null) {
+            engineManager.setActiveSession(nextTab.id)
+        }
+    }
+
     fun closeTab(tabId: String) {
+        val closingTab = tabs.value.firstOrNull { it.id == tabId }
         engineManager.closeSession(tabId)
         val nextId = tabRepository.closeTab(tabId, settings.value.homePageUrl)
         if (nextId != null) {
             engineManager.setActiveSession(nextId)
+        }
+        if (closingTab != null && !closingTab.isPrivate) {
+            triggerUndoAction("Onglet fermé : ${closingTab.title.ifBlank { "Nouvel onglet" }}") {
+                restoreRecentlyClosedTab(closingTab.id)
+            }
         }
     }
 
@@ -564,6 +701,129 @@ class NexusBrowserViewModel @Inject constructor(
 
     fun clearRecentlyClosedTabs() {
         tabRepository.clearRecentlyClosedTabs()
+    }
+
+    // --- Gestion des fenêtres de navigation ---
+
+    fun createWindow(name: String, isPrivate: Boolean = false): String {
+        return tabRepository.createWindow(customName = name).id
+    }
+
+    fun renameWindow(windowId: String, newName: String) {
+        tabRepository.renameWindow(windowId, newName)
+    }
+
+    fun selectWindow(windowId: String) {
+        tabRepository.selectWindow(windowId)
+        val activeInWin = tabs.value.firstOrNull { it.windowId == windowId }
+        if (activeInWin != null) {
+            engineManager.setActiveSession(activeInWin.id)
+        }
+    }
+
+    fun moveTabToWindow(tabId: String, targetWindowId: String) {
+        tabRepository.moveTabToWindow(tabId, targetWindowId)
+    }
+
+    fun closeWindow(windowId: String) {
+        val win = windows.value.firstOrNull { it.id == windowId }
+        val nextTabId = tabRepository.closeWindow(windowId, settings.value.homePageUrl)
+        if (nextTabId != null) {
+            engineManager.setActiveSession(nextTabId)
+        }
+        if (win != null && !win.isPrivate) {
+            triggerUndoAction("Fenêtre fermée : ${win.name}") {
+                restoreClosedWindow(win.id)
+            }
+        }
+    }
+
+    fun restoreClosedWindow(closedWindowId: String) {
+        val restored = tabRepository.restoreClosedWindow(closedWindowId)
+        if (restored != null) {
+            showBanner("Fenêtre restaurée : ${restored.name}")
+        }
+    }
+
+    // --- Gestion des groupes d'onglets ---
+
+    fun createTabGroup(name: String, colorHex: String, windowId: String? = null): String {
+        val winId = windowId ?: activeWindowId.value
+        return tabRepository.createTabGroup(name, colorHex, winId).id
+    }
+
+    fun updateTabGroup(groupId: String, name: String, colorHex: String) {
+        tabRepository.updateTabGroup(groupId, name, colorHex)
+    }
+
+    fun assignTabToGroup(tabId: String, groupId: String?) {
+        tabRepository.assignTabToGroup(tabId, groupId)
+    }
+
+    fun closeTabGroup(groupId: String) {
+        val group = tabGroups.value.firstOrNull { it.id == groupId }
+        val closedIds = tabRepository.closeTabGroup(groupId, settings.value.homePageUrl)
+        if (group != null) {
+            triggerUndoAction("Groupe fermé : ${group.name}") {
+                restoreClosedTabGroup(group.id)
+            }
+        }
+    }
+
+    fun restoreClosedTabGroup(closedGroupId: String) {
+        val restored = tabRepository.restoreClosedTabGroup(closedGroupId)
+        if (restored != null) {
+            showBanner("Groupe d'onglets restauré : ${restored.name}")
+        }
+    }
+
+    // --- Paramètres rapides (colonnes raccourcis, mode onglets, moteur) ---
+
+    fun setTabsLayoutMode(mode: String) {
+        viewModelScope.launch {
+            preferencesRepository.updateTabsLayoutMode(mode)
+        }
+    }
+
+    fun setHomeShortcutColumns(columns: Int) {
+        viewModelScope.launch {
+            preferencesRepository.updateHomeShortcutColumns(columns)
+        }
+    }
+
+    fun setHomeQuickAccess(enabled: Boolean) {
+        viewModelScope.launch {
+            preferencesRepository.updateHomeQuickAccess(enabled)
+        }
+    }
+
+    fun setHomeSections(shortcuts: Boolean, bookmarks: Boolean, recentHistory: Boolean) {
+        viewModelScope.launch {
+            preferencesRepository.updateHomeSections(shortcuts, bookmarks, recentHistory)
+        }
+    }
+
+    fun setSearchEngine(engine: SearchEngine) {
+        viewModelScope.launch {
+            preferencesRepository.updateSearchEngine(engine)
+        }
+    }
+
+    fun clearRecentSearches() {
+        viewModelScope.launch {
+            preferencesRepository.clearRecentSearches()
+            showBanner("Recherches récentes effacées")
+        }
+    }
+
+    fun handleExternalIntentUrl(externalUrl: String) {
+        if (!SecurityPolicy.isSafeNavigationUrl(externalUrl)) return
+        val openInNew = settings.value.openLinksInNewTab
+        if (openInNew || activeTab.value == null) {
+            createNewTab(url = externalUrl, isPrivate = false)
+        } else {
+            navigateToInput(externalUrl)
+        }
     }
 
     fun toggleCurrentTabBookmark() {
@@ -767,6 +1027,10 @@ class NexusBrowserViewModel @Inject constructor(
 
     override fun onProgressChanged(tabId: String, progress: Int) {
         tabRepository.updateTab(tabId) { it.copy(progress = progress) }
+    }
+
+    override fun onScrollStateChanged(tabId: String, canScrollToTop: Boolean) {
+        tabRepository.updateTab(tabId) { it.copy(canScrollToTop = canScrollToTop) }
     }
 
     override fun onLoadingStateChanged(tabId: String, isLoading: Boolean) {

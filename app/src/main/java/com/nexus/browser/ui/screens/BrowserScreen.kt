@@ -8,6 +8,8 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -63,7 +65,14 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Restore
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.SearchOff
 import androidx.compose.material.icons.filled.StarBorder
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material3.Card
@@ -137,6 +146,7 @@ fun BrowserScreen(
     activeTab: BrowserTab?,
     tabCount: Int,
     activeExtensionsCount: Int,
+    downloadsCount: Int = 0,
     settings: NexusSettingsState,
     suggestions: List<AddressSuggestion>,
     shortcuts: List<HomeShortcutEntity>,
@@ -145,8 +155,10 @@ fun BrowserScreen(
     isBrowserFullScreen: Boolean = false,
     findInPageState: FindInPageUiState = FindInPageUiState(),
     readerModeState: ReaderModeUiState = ReaderModeUiState(),
+    undoBannerMessage: String? = null,
     obtainGeckoSession: (BrowserTab) -> GeckoSession,
     onAddressQueryChange: (String) -> Unit,
+    onAddressBarFocused: (String) -> Unit = {},
     onNavigate: (String) -> Unit,
     onHomeClick: () -> Unit,
     onBackClick: () -> Unit,
@@ -176,9 +188,20 @@ fun BrowserScreen(
     onTranslatePage: (String) -> Unit = {},
     onRestoreTranslatedPage: () -> Unit = {},
     onCaptureViewport: (Bitmap, Boolean) -> Unit = { _, _ -> },
-    onCaptureFullPageArticle: (Boolean) -> Unit = {}
+    onCaptureFullPageArticle: (Boolean) -> Unit = {},
+    onScrollToTop: () -> Unit = {},
+    onSwipeAdjacentTab: (Int) -> Unit = {},
+    onPerformUndoClose: () -> Unit = {},
+    onDismissUndoBanner: () -> Unit = {},
+    onCacheActiveTabPreview: (Bitmap) -> Unit = {},
+    onSetHomeShortcutColumns: (Int) -> Unit = {},
+    onSetHomeSections: (Boolean, Boolean, Boolean) -> Unit = { _, _, _ -> },
+    onSetHomeQuickAccess: (Boolean) -> Unit = {},
+    onSetSearchEngine: (com.nexus.browser.core.common.SearchEngine) -> Unit = {},
+    onClearRecentSearches: () -> Unit = {}
 ) {
     val palette = LocalNexusPalette.current
+    val context = androidx.compose.ui.platform.LocalContext.current
     val clipboardManager = LocalClipboardManager.current
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -195,6 +218,30 @@ fun BrowserScreen(
     val isFullScreen = (activeTab?.isFullScreen == true) || isBrowserFullScreen
     val currentUrl = activeTab?.url.orEmpty()
     val isTranslatedPage = remember(currentUrl) { PageTranslator.isCurrentlyTranslatedUrl(currentUrl) }
+
+    val shareUrl: (String) -> Unit = { url ->
+        runCatching {
+            val sendIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                putExtra(android.content.Intent.EXTRA_TEXT, url)
+                type = "text/plain"
+            }
+            val shareIntent = android.content.Intent.createChooser(sendIntent, "Partager l'adresse")
+            context.startActivity(shareIntent)
+        }.onFailure {
+            clipboardManager.setText(AnnotatedString(url))
+            onShowBanner("URL copiée dans le presse-papiers")
+        }
+    }
+
+    // Capture automatique de miniature dès qu'une page a terminé son chargement
+    LaunchedEffect(activeTab?.id, activeTab?.isLoading) {
+        if (activeTab != null && !activeTab.isHomeTab && !activeTab.isLoading) {
+            kotlinx.coroutines.delay(650)
+            geckoViewRef?.capturePixels()?.accept({ bmp ->
+                if (bmp != null) onCacheActiveTabPreview(bmp)
+            }, {})
+        }
+    }
 
     val releaseGeckoFocusForAddressBar = {
         geckoViewRef?.apply {
@@ -269,7 +316,7 @@ fun BrowserScreen(
                     releaseGeckoFocusForAddressBar()
                     val u = activeTab?.url.orEmpty()
                     addressInput = if (UrlUtils.isHomeUrl(u)) "" else u
-                    onAddressQueryChange(addressInput)
+                    onAddressBarFocused(addressInput)
                     isEditingAddress = true
                 } else {
                     isEditingAddress = false
@@ -284,6 +331,12 @@ fun BrowserScreen(
             onCopyUrl = { urlToCopy ->
                 clipboardManager.setText(AnnotatedString(urlToCopy))
                 onShowBanner("URL copiée dans le presse-papiers")
+            },
+            onShareUrl = { urlToShare ->
+                shareUrl(urlToShare)
+            },
+            onSwipeTab = { delta ->
+                onSwipeAdjacentTab(delta)
             },
             onReloadOrStopClick = onReloadOrStopClick,
             onExtensionsClick = { onOpenDestination(NexusDestination.EXTENSIONS) },
@@ -401,6 +454,42 @@ fun BrowserScreen(
                 colors = CardDefaults.cardColors(containerColor = palette.surfaceElevated)
             ) {
                 Column(modifier = Modifier.padding(vertical = 4.dp)) {
+                    // Sélecteur rapide de moteur de recherche
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Moteur :",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = palette.textSecondary
+                        )
+                        com.nexus.browser.core.common.SearchEngine.values().forEach { engine ->
+                            val isSelected = settings.searchEngine == engine
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (isSelected) palette.primary.copy(alpha = 0.2f) else palette.surface,
+                                border = BorderStroke(1.dp, if (isSelected) palette.primary else palette.border.copy(alpha = 0.5f)),
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable { onSetSearchEngine(engine) }
+                            ) {
+                                Text(
+                                    text = engine.displayName,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (isSelected) palette.primary else palette.textPrimary,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                )
+                            }
+                        }
+                    }
+                    HorizontalDivider(color = palette.border.copy(alpha = 0.4f))
+
                     suggestions.forEach { suggestion ->
                         Row(
                             modifier = Modifier
@@ -417,6 +506,7 @@ fun BrowserScreen(
                         ) {
                             Icon(
                                 imageVector = when (suggestion.source) {
+                                    SuggestionSource.RECENT_SEARCH -> Icons.Default.Restore
                                     SuggestionSource.BOOKMARK -> Icons.Default.Bookmark
                                     SuggestionSource.HISTORY -> Icons.Default.History
                                     SuggestionSource.DOMAIN_AUTOCOMPLETE -> Icons.Default.Public
@@ -446,6 +536,31 @@ fun BrowserScreen(
                             }
                         }
                     }
+
+                    if (settings.recentSearches.isNotEmpty()) {
+                        HorizontalDivider(color = palette.border.copy(alpha = 0.4f))
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onClearRecentSearches() }
+                                .padding(horizontal = 14.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Delete,
+                                contentDescription = null,
+                                tint = palette.textSecondary,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                text = "Effacer les recherches récentes",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = palette.textSecondary
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -459,6 +574,8 @@ fun BrowserScreen(
                     shortcuts = shortcuts,
                     bookmarks = bookmarks,
                     recentHistory = recentHistory,
+                    tabCount = tabCount,
+                    downloadsCount = downloadsCount,
                     onSearchSubmit = { query ->
                         isEditingAddress = false
                         onNavigate(query)
@@ -472,7 +589,10 @@ fun BrowserScreen(
                     onEditShortcutClick = { shortcut ->
                         editingShortcut = shortcut
                         showShortcutDialog = true
-                    }
+                    },
+                    onSetShortcutColumns = onSetHomeShortcutColumns,
+                    onToggleHomeSections = onSetHomeSections,
+                    onToggleQuickAccess = onSetHomeQuickAccess
                 )
             } else if (activeTab != null) {
                 GeckoSessionViewport(
@@ -500,6 +620,102 @@ fun BrowserScreen(
                     onSetTheme = onSetReaderTheme,
                     onCaptureArticle = { onCaptureFullPageArticle(true) }
                 )
+            }
+
+            // Bouton flottant pour remonter en haut de page
+            androidx.compose.animation.AnimatedVisibility(
+                visible = !isFullScreen && !isHomeTab && activeTab?.canScrollToTop == true,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 16.dp, bottom = 16.dp)
+            ) {
+                Surface(
+                    shape = CircleShape,
+                    color = palette.surfaceElevated.copy(alpha = 0.95f),
+                    border = BorderStroke(1.dp, palette.primary.copy(alpha = 0.5f)),
+                    shadowElevation = 6.dp,
+                    modifier = Modifier
+                        .size(46.dp)
+                        .clip(CircleShape)
+                        .clickable { onScrollToTop() }
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.KeyboardArrowUp,
+                            contentDescription = "Haut de page",
+                            tint = palette.primary,
+                            modifier = Modifier.size(26.dp)
+                        )
+                    }
+                }
+            }
+
+            // Bannière d'annulation (Undo)
+            androidx.compose.animation.AnimatedVisibility(
+                visible = undoBannerMessage != null,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .padding(start = 14.dp, end = 14.dp, bottom = 12.dp)
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = palette.surfaceElevated,
+                    border = BorderStroke(1.dp, palette.primary.copy(alpha = 0.4f)),
+                    shadowElevation = 8.dp
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Restore,
+                                contentDescription = null,
+                                tint = palette.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(Modifier.width(10.dp))
+                            Text(
+                                text = undoBannerMessage.orEmpty(),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = palette.textPrimary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            TextButton(
+                                onClick = onPerformUndoClose,
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = "Annuler",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = palette.primary,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            IconButton(
+                                onClick = onDismissUndoBanner,
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Fermer",
+                                    tint = palette.textSecondary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                    }
+                }
             }
 
             // Bouton flottant discret pour quitter facilement le mode plein écran à tout moment
@@ -571,7 +787,8 @@ fun BrowserScreen(
                 onMenuClick = {
                     isEditingAddress = false
                     showMenuSheet = true
-                }
+                },
+                onSwipeAdjacentTab = onSwipeAdjacentTab
             )
         }
     }
@@ -1453,14 +1670,33 @@ private fun NexusBottomNavBar(
     onHomeClick: () -> Unit,
     onTabsClick: () -> Unit,
     onNewTabQuickClick: () -> Unit,
-    onMenuClick: () -> Unit
+    onMenuClick: () -> Unit,
+    onSwipeAdjacentTab: (Int) -> Unit = {}
 ) {
     val palette = LocalNexusPalette.current
+    var totalDrag by remember { mutableStateOf(0f) }
 
     Surface(
         color = palette.surface.copy(alpha = 0.96f),
         tonalElevation = 2.dp,
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .fillMaxWidth()
+            .pointerInput(Unit) {
+                detectHorizontalDragGestures(
+                    onDragEnd = {
+                        if (totalDrag > 60f) {
+                            onSwipeAdjacentTab(-1) // Swipe droite -> onglet précédent
+                        } else if (totalDrag < -60f) {
+                            onSwipeAdjacentTab(1)  // Swipe gauche -> onglet suivant
+                        }
+                        totalDrag = 0f
+                    },
+                    onDragCancel = { totalDrag = 0f },
+                    onHorizontalDrag = { _, dragAmount ->
+                        totalDrag += dragAmount
+                    }
+                )
+            }
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
             HorizontalDivider(color = palette.border.copy(alpha = 0.55f), thickness = 0.5.dp)
@@ -1606,14 +1842,20 @@ private fun NexusHomeContent(
     shortcuts: List<HomeShortcutEntity>,
     bookmarks: List<BookmarkEntity>,
     recentHistory: List<HistoryEntity>,
+    tabCount: Int = 1,
+    downloadsCount: Int = 0,
     onSearchSubmit: (String) -> Unit,
     onVoiceSearchClick: () -> Unit,
     onOpenDestination: (NexusDestination) -> Unit,
     onAddShortcutClick: () -> Unit,
-    onEditShortcutClick: (HomeShortcutEntity) -> Unit
+    onEditShortcutClick: (HomeShortcutEntity) -> Unit,
+    onSetShortcutColumns: (Int) -> Unit = {},
+    onToggleHomeSections: (Boolean, Boolean, Boolean) -> Unit = { _, _, _ -> },
+    onToggleQuickAccess: (Boolean) -> Unit = {}
 ) {
     val palette = LocalNexusPalette.current
     var homeSearchQuery by remember { mutableStateOf("") }
+    var showHomeSectionsDialog by remember { mutableStateOf(false) }
 
     NexusCosmicBackground(
         isPrivate = isPrivate,
@@ -1623,7 +1865,7 @@ private fun NexusHomeContent(
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(horizontal = 24.dp, vertical = 32.dp),
-            verticalArrangement = Arrangement.spacedBy(28.dp)
+            verticalArrangement = Arrangement.spacedBy(24.dp)
         ) {
             // 1. Logo ruban 3D NEXUS + N Ξ X U S + Barre de recherche centrale
             item(key = "home_header") {
@@ -1654,7 +1896,7 @@ private fun NexusHomeContent(
                             )
                         }
                     }
-                    Spacer(Modifier.height(28.dp))
+                    Spacer(Modifier.height(26.dp))
 
                     NexusSearchBar(
                         query = homeSearchQuery,
@@ -1671,21 +1913,110 @@ private fun NexusHomeContent(
                 }
             }
 
-            // 2. Raccourcis sous forme d'icônes d'applications blanches épurées
+            // 2. Cartes d'accès rapide (Onglets ouverts & Téléchargements)
+            if (settings.showHomeQuickAccess) {
+                item(key = "home_quick_access") {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Surface(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(16.dp))
+                                .clickable { onOpenDestination(NexusDestination.TABS) },
+                            shape = RoundedCornerShape(16.dp),
+                            color = palette.surfaceElevated.copy(alpha = 0.85f),
+                            border = BorderStroke(1.dp, palette.border.copy(alpha = 0.6f))
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Menu,
+                                    contentDescription = null,
+                                    tint = palette.primary,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                                Spacer(Modifier.width(10.dp))
+                                Column {
+                                    Text(
+                                        text = "Onglets ouverts",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = palette.textSecondary
+                                    )
+                                    Text(
+                                        text = "$tabCount onglet(s)",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = palette.textPrimary
+                                    )
+                                }
+                            }
+                        }
+
+                        Surface(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(16.dp))
+                                .clickable { onOpenDestination(NexusDestination.DOWNLOADS) },
+                            shape = RoundedCornerShape(16.dp),
+                            color = palette.surfaceElevated.copy(alpha = 0.85f),
+                            border = BorderStroke(1.dp, palette.border.copy(alpha = 0.6f))
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Download,
+                                    contentDescription = null,
+                                    tint = palette.primary,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                                Spacer(Modifier.width(10.dp))
+                                Column {
+                                    Text(
+                                        text = "Téléchargements",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = palette.textSecondary
+                                    )
+                                    Text(
+                                        text = "$downloadsCount fichier(s)",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = palette.textPrimary
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 3. Raccourcis sous forme d'icônes d'applications blanches épurées
             if (settings.showHomeShortcuts) {
                 item(key = "home_shortcuts") {
+                    val numCols = settings.homeShortcutColumns.coerceIn(3, 5)
+                    val (itemWidth, badgeSize) = when (numCols) {
+                        3 -> 90.dp to 62.dp
+                        5 -> 62.dp to 48.dp
+                        else -> 74.dp to 56.dp
+                    }
+
                     FlowRow(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(top = 4.dp),
+                            .padding(top = 2.dp),
                         horizontalArrangement = Arrangement.SpaceEvenly,
-                        verticalArrangement = Arrangement.spacedBy(16.dp),
-                        maxItemsInEachRow = 4
+                        verticalArrangement = Arrangement.spacedBy(14.dp),
+                        maxItemsInEachRow = numCols
                     ) {
                         shortcuts.forEach { shortcut ->
                             Column(
                                 modifier = Modifier
-                                    .width(74.dp)
+                                    .width(itemWidth)
                                     .clip(RoundedCornerShape(16.dp))
                                     .combinedClickable(
                                         onClick = { onSearchSubmit(shortcut.url) },
@@ -1697,7 +2028,7 @@ private fun NexusHomeContent(
                                 NexusSiteBadge(
                                     title = shortcut.title,
                                     url = shortcut.url,
-                                    size = 56.dp
+                                    size = badgeSize
                                 )
                                 Spacer(Modifier.height(8.dp))
                                 Text(
@@ -1716,8 +2047,27 @@ private fun NexusHomeContent(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(top = 10.dp),
-                        horizontalArrangement = Arrangement.End
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
+                        TextButton(
+                            onClick = { showHomeSectionsDialog = true },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Tune,
+                                contentDescription = null,
+                                tint = palette.textSecondary,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                text = "Personnaliser l'accueil",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = palette.textSecondary
+                            )
+                        }
+
                         TextButton(
                             onClick = onAddShortcutClick,
                             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
@@ -1725,21 +2075,21 @@ private fun NexusHomeContent(
                             Icon(
                                 imageVector = Icons.Default.Add,
                                 contentDescription = null,
-                                tint = palette.textSecondary,
+                                tint = palette.primary,
                                 modifier = Modifier.size(14.dp)
                             )
                             Spacer(Modifier.width(4.dp))
                             Text(
-                                text = "Personnaliser les raccourcis",
+                                text = "Ajouter un raccourci",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = palette.textSecondary
+                                color = palette.primary
                             )
                         }
                     }
                 }
             }
 
-            // 3. Accès rapide aux favoris
+            // 4. Accès rapide aux favoris
             if (settings.showHomeBookmarks && bookmarks.isNotEmpty()) {
                 item(key = "home_bookmarks") {
                     SectionHeader(
@@ -1760,7 +2110,7 @@ private fun NexusHomeContent(
                 }
             }
 
-            // 4. Sites récemment visités
+            // 5. Sites récemment visités
             if (!isPrivate && settings.showHomeRecentHistory && recentHistory.isNotEmpty()) {
                 item(key = "home_recent_history") {
                     SectionHeader(
@@ -1778,6 +2128,84 @@ private fun NexusHomeContent(
                             )
                         }
                     }
+                }
+            }
+        }
+    }
+
+    if (showHomeSectionsDialog) {
+        NexusDialog(
+            title = "Personnaliser la page d'accueil",
+            confirmText = "Fermer",
+            dismissText = "",
+            onDismissRequest = { showHomeSectionsDialog = false },
+            onConfirm = { showHomeSectionsDialog = false }
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Text(
+                    text = "Colonnes de raccourcis",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = palette.textPrimary,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(3, 4, 5).forEach { cols ->
+                        FilterChip(
+                            selected = settings.homeShortcutColumns == cols,
+                            onClick = { onSetShortcutColumns(cols) },
+                            label = { Text("$cols colonnes") }
+                        )
+                    }
+                }
+
+                HorizontalDivider(color = palette.border.copy(alpha = 0.5f))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Cartes d'accès rapide (Onglets & Téléchargements)", style = MaterialTheme.typography.bodyMedium, color = palette.textPrimary, modifier = Modifier.weight(1f))
+                    Switch(
+                        checked = settings.showHomeQuickAccess,
+                        onCheckedChange = { onToggleQuickAccess(it) }
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Raccourcis de sites", style = MaterialTheme.typography.bodyMedium, color = palette.textPrimary, modifier = Modifier.weight(1f))
+                    Switch(
+                        checked = settings.showHomeShortcuts,
+                        onCheckedChange = { onToggleHomeSections(it, settings.showHomeBookmarks, settings.showHomeRecentHistory) }
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Favoris sur l'accueil", style = MaterialTheme.typography.bodyMedium, color = palette.textPrimary, modifier = Modifier.weight(1f))
+                    Switch(
+                        checked = settings.showHomeBookmarks,
+                        onCheckedChange = { onToggleHomeSections(settings.showHomeShortcuts, it, settings.showHomeRecentHistory) }
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Historique récent", style = MaterialTheme.typography.bodyMedium, color = palette.textPrimary, modifier = Modifier.weight(1f))
+                    Switch(
+                        checked = settings.showHomeRecentHistory,
+                        onCheckedChange = { onToggleHomeSections(settings.showHomeShortcuts, settings.showHomeBookmarks, it) }
+                    )
                 }
             }
         }

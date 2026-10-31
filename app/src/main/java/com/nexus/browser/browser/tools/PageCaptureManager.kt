@@ -3,14 +3,17 @@ package com.nexus.browser.browser.tools
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.media.MediaScannerConnection
+import android.os.Build
 import android.os.Environment
 import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
+import android.util.LruCache
 import androidx.core.content.FileProvider
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -23,11 +26,71 @@ import java.util.Locale
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.math.max
+import kotlin.math.roundToInt
 
 @Singleton
 class PageCaptureManager @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
+    private val previewMemoryCache = object : LruCache<String, Bitmap>(18) {}
+
+    suspend fun saveTabPreviewBitmap(tabId: String, source: Bitmap): String? = withContext(Dispatchers.IO) {
+        runCatching {
+            if (source.width <= 0 || source.height <= 0) return@runCatching null
+            val targetWidth = 420
+            val scale = targetWidth.toFloat() / source.width.toFloat()
+            val targetHeight = (source.height * scale).roundToInt().coerceIn(220, 760)
+            val scaled = Bitmap.createScaledBitmap(source, targetWidth, targetHeight, true)
+
+            val previewDir = File(context.cacheDir, "tab_previews").apply { mkdirs() }
+            val file = File(previewDir, "tab_${tabId}.webp")
+            FileOutputStream(file).use { out ->
+                val format = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    Bitmap.CompressFormat.WEBP_LOSSY
+                } else {
+                    @Suppress("DEPRECATION")
+                    Bitmap.CompressFormat.WEBP
+                }
+                scaled.compress(format, 82, out)
+            }
+            val key = "${file.absolutePath}?t=${System.currentTimeMillis()}"
+            synchronized(previewMemoryCache) {
+                previewMemoryCache.put(tabId, scaled)
+                previewMemoryCache.put(key, scaled)
+            }
+            key
+        }.getOrNull()
+    }
+
+    fun getCachedTabPreview(tabId: String, previewPath: String?): Bitmap? {
+        synchronized(previewMemoryCache) {
+            if (!previewPath.isNullOrBlank()) {
+                previewMemoryCache.get(previewPath)?.let { if (!it.isRecycled) return it }
+            }
+            previewMemoryCache.get(tabId)?.let { if (!it.isRecycled) return it }
+        }
+        val cleanPath = previewPath?.substringBefore("?") ?: return null
+        val file = File(cleanPath)
+        if (!file.exists()) return null
+        return runCatching {
+            BitmapFactory.decodeFile(file.absolutePath)?.also { decoded ->
+                synchronized(previewMemoryCache) {
+                    previewMemoryCache.put(tabId, decoded)
+                    previewMemoryCache.put(previewPath, decoded)
+                }
+            }
+        }.getOrNull()
+    }
+
+    fun deleteTabPreview(tabId: String) {
+        synchronized(previewMemoryCache) {
+            previewMemoryCache.remove(tabId)
+        }
+        runCatching {
+            val file = File(File(context.cacheDir, "tab_previews"), "tab_${tabId}.webp")
+            if (file.exists()) file.delete()
+        }
+    }
     suspend fun saveViewportBitmap(bitmap: Bitmap, pageTitle: String): File? = withContext(Dispatchers.IO) {
         saveBitmapToCapturesDir(bitmap, prefix = "NEXUS_Capture", title = pageTitle)
     }

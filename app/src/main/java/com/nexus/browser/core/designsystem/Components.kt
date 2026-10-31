@@ -50,7 +50,11 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
@@ -98,7 +102,9 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -688,9 +694,11 @@ fun NexusToolbar(
     onAddressFocusChange: (Boolean) -> Unit,
     onSubmitAddress: (String) -> Unit,
     onCopyUrl: (String) -> Unit,
+    onShareUrl: (String) -> Unit = {},
     onReloadOrStopClick: () -> Unit,
     onExtensionsClick: () -> Unit,
     onReleaseWebViewFocus: () -> Unit = {},
+    onSwipeTab: (Int) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val palette = LocalNexusPalette.current
@@ -762,10 +770,32 @@ fun NexusToolbar(
         }
     }
 
+    var totalDragAmount by remember { mutableStateOf(0f) }
+
     Column(
         modifier = modifier
             .fillMaxWidth()
             .background(palette.surface)
+            .pointerInput(isEditingAddress) {
+                if (!isEditingAddress) {
+                    detectHorizontalDragGestures(
+                        onHorizontalDrag = { _, dragAmount ->
+                            totalDragAmount += dragAmount
+                        },
+                        onDragEnd = {
+                            if (totalDragAmount > 60f) {
+                                onSwipeTab(-1) // Glisser vers la droite -> onglet précédent
+                            } else if (totalDragAmount < -60f) {
+                                onSwipeTab(1) // Glisser vers la gauche -> onglet suivant
+                            }
+                            totalDragAmount = 0f
+                        },
+                        onDragCancel = {
+                            totalDragAmount = 0f
+                        }
+                    )
+                }
+            }
     ) {
         Row(
             modifier = Modifier
@@ -943,6 +973,15 @@ fun NexusToolbar(
                         )
                         Spacer(Modifier.width(10.dp))
                         Icon(
+                            imageVector = Icons.Default.Share,
+                            contentDescription = "Partager l'URL",
+                            tint = palette.textSecondary,
+                            modifier = Modifier
+                                .size(17.dp)
+                                .clickable { onShareUrl(addressText) }
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Icon(
                             imageVector = if (isLoading) Icons.Default.Close else Icons.Default.Refresh,
                             contentDescription = if (isLoading) "Arrêter le chargement" else "Actualiser la page",
                             tint = palette.textSecondary,
@@ -980,132 +1019,272 @@ fun NexusToolbar(
 }
 
 /**
- * Carte d'aperçu d'onglet conforme au téléphone central de la maquette (Onglets).
+ * Carte d'aperçu d'onglet moderne supportant le mode Grille (Visuel avec miniature capturée)
+ * ou le mode Liste (Compact), avec badges de groupe, épinglage, domaine et actions tactiles.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun NexusTabCard(
     title: String,
     url: String,
     isActive: Boolean,
     isPrivate: Boolean,
+    isPinned: Boolean = false,
+    groupColorHex: String? = null,
+    groupName: String? = null,
+    previewBitmap: android.graphics.Bitmap? = null,
+    isListMode: Boolean = false,
     onSelect: () -> Unit,
     onClose: () -> Unit,
     onDuplicate: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val palette = LocalNexusPalette.current
     val isHome = UrlUtils.isHomeUrl(url)
+    val host = remember(url) { UrlUtils.extractHost(url).ifBlank { url } }
     val borderColor = when {
         isActive && isPrivate -> NexusColors.PrivateAccent
-        isActive -> NexusColors.BrandCyan.copy(alpha = 0.85f)
+        isActive -> NexusColors.BrandCyan.copy(alpha = 0.9f)
         else -> palette.border
     }
+    val groupColor = remember(groupColorHex) {
+        groupColorHex?.let { runCatching { Color(android.graphics.Color.parseColor(it)) }.getOrNull() }
+    }
 
-    if (isHome) {
-        // Carte d'accueil NEXUS avec fond cosmique et logo NEXUS officiel (comme sur la maquette Onglets)
+    if (isListMode) {
+        // Mode Liste : Carte compacte horizontale
         Card(
             modifier = modifier
                 .fillMaxWidth()
-                .height(106.dp)
-                .clickable { onSelect() },
-            shape = RoundedCornerShape(18.dp),
-            border = BorderStroke(if (isActive) 2.dp else 1.dp, borderColor),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF060B1E))
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.linearGradient(
-                            colors = listOf(
-                                Color(0xFF040817),
-                                Color(0xFF0D2159),
-                                Color(0xFF2E1065)
-                            )
-                        )
-                    )
-                    .padding(14.dp)
-            ) {
-                Row(
-                    modifier = Modifier.align(Alignment.Center),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
-                ) {
-                    NexusBrandLogo(size = 42.dp, isPrivate = isPrivate)
-                    Spacer(Modifier.width(12.dp))
-                    NexusWordmark(fontSize = 20.sp, letterSpacing = 4.sp, color = Color.White)
-                }
-                IconButton(
-                    onClick = onClose,
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .size(28.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = "Fermer l'onglet",
-                        tint = Color.White.copy(alpha = 0.75f),
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-            }
-        }
-    } else {
-        // Carte d'onglet web avec badge de site (Google, Wikipedia, etc.)
-        val host = remember(url) { UrlUtils.extractHost(url).ifBlank { url } }
-        Card(
-            modifier = modifier
-                .fillMaxWidth()
-                .clickable { onSelect() },
-            shape = RoundedCornerShape(18.dp),
+                .clip(RoundedCornerShape(16.dp))
+                .combinedClickable(
+                    onClick = onSelect,
+                    onLongClick = onLongClick
+                ),
+            shape = RoundedCornerShape(16.dp),
             border = BorderStroke(if (isActive) 2.dp else 1.dp, borderColor),
             colors = CardDefaults.cardColors(containerColor = palette.surfaceElevated)
         ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 16.dp),
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                NexusSiteBadge(
-                    title = title.ifBlank { host },
-                    url = url,
-                    size = 44.dp
-                )
-                Spacer(Modifier.width(14.dp))
+                if (groupColor != null) {
+                    Box(
+                        modifier = Modifier
+                            .width(4.dp)
+                            .height(34.dp)
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(groupColor)
+                    )
+                    Spacer(Modifier.width(10.dp))
+                }
+
+                if (isHome) {
+                    NexusBrandLogo(size = 36.dp, isPrivate = isPrivate)
+                } else {
+                    NexusSiteBadge(title = title.ifBlank { host }, url = url, size = 38.dp)
+                }
+                Spacer(Modifier.width(12.dp))
+
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = title.ifBlank { host },
-                        style = MaterialTheme.typography.titleMedium.copy(fontSize = 17.sp),
-                        color = palette.textPrimary,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (isPinned) {
+                            Icon(
+                                imageVector = Icons.Default.PushPin,
+                                contentDescription = "Épinglé",
+                                tint = palette.primary,
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Spacer(Modifier.width(4.dp))
+                        }
+                        Text(
+                            text = if (isHome) "Nouvel onglet" else title.ifBlank { host },
+                            style = MaterialTheme.typography.titleMedium.copy(fontSize = 15.sp),
+                            color = palette.textPrimary,
+                            fontWeight = if (isActive) FontWeight.Bold else FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                     Spacer(Modifier.height(2.dp))
-                    Text(
-                        text = host,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = palette.textSecondary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (!groupName.isNullOrBlank() && groupColor != null) {
+                            Text(
+                                text = groupName,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = groupColor,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = " • ",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = palette.textSecondary
+                            )
+                        }
+                        Text(
+                            text = if (isHome) "nexus://home" else host,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = palette.textSecondary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
-                TextButton(
-                    onClick = onDuplicate,
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+
+                IconButton(
+                    onClick = onClose,
+                    modifier = Modifier.size(32.dp)
                 ) {
-                    Icon(Icons.Default.Add, contentDescription = "Dupliquer", modifier = Modifier.size(14.dp))
-                    Spacer(Modifier.width(2.dp))
-                    Text("Dupliquer", fontSize = 11.sp)
-                }
-                IconButton(onClick = onClose, modifier = Modifier.size(30.dp)) {
                     Icon(
                         imageVector = Icons.Default.Close,
                         contentDescription = "Fermer l'onglet",
                         tint = palette.textSecondary,
                         modifier = Modifier.size(18.dp)
                     )
+                }
+            }
+        }
+    } else {
+        // Mode Grille : Carte visuelle avec aperçu capturé, fond cosmique ou aperçu de site
+        Card(
+            modifier = modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(18.dp))
+                .combinedClickable(
+                    onClick = onSelect,
+                    onLongClick = onLongClick
+                ),
+            shape = RoundedCornerShape(18.dp),
+            border = BorderStroke(if (isActive) 2.dp else 1.dp, borderColor),
+            colors = CardDefaults.cardColors(containerColor = palette.surfaceElevated)
+        ) {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                // Barre d'en-tête de la carte
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(palette.surfaceElevated)
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (groupColor != null) {
+                        Box(
+                            modifier = Modifier
+                                .size(10.dp)
+                                .clip(CircleShape)
+                                .background(groupColor)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                    }
+
+                    if (isPinned) {
+                        Icon(
+                            imageVector = Icons.Default.PushPin,
+                            contentDescription = "Épinglé",
+                            tint = palette.primary,
+                            modifier = Modifier.size(13.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                    }
+
+                    Text(
+                        text = if (isHome) "Nouvel onglet" else title.ifBlank { host },
+                        style = MaterialTheme.typography.labelLarge,
+                        color = palette.textPrimary,
+                        fontWeight = if (isActive) FontWeight.Bold else FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    IconButton(
+                        onClick = onClose,
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Fermer l'onglet",
+                            tint = palette.textSecondary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+
+                // Zone d'aperçu visuel (miniature capturée ou vue graphique)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(130.dp)
+                        .background(if (isHome) Color(0xFF060B1E) else palette.background),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (previewBitmap != null && !previewBitmap.isRecycled) {
+                        Image(
+                            bitmap = previewBitmap.asImageBitmap(),
+                            contentDescription = "Aperçu de la page",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
+                        )
+                    } else if (isHome) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(
+                                    Brush.linearGradient(
+                                        listOf(
+                                            Color(0xFF040817),
+                                            Color(0xFF0D2159),
+                                            Color(0xFF2E1065)
+                                        )
+                                    )
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                NexusBrandLogo(size = 46.dp, isPrivate = isPrivate)
+                                Spacer(Modifier.height(6.dp))
+                                NexusWordmark(fontSize = 16.sp, letterSpacing = 4.sp, color = Color.White)
+                            }
+                        }
+                    } else {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                            modifier = Modifier.padding(12.dp)
+                        ) {
+                            NexusSiteBadge(title = title.ifBlank { host }, url = url, size = 48.dp)
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                text = host,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = palette.textSecondary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+
+                    if (isActive) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                .padding(6.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(palette.primary)
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = "Actif",
+                                color = Color.White,
+                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
                 }
             }
         }

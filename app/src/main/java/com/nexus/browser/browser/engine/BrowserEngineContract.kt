@@ -24,6 +24,7 @@ interface BrowserEngineContract {
     fun setDesktopMode(tabId: String, enabled: Boolean)
     fun findInPage(tabId: String, query: String, backwards: Boolean, onResult: (current: Int, total: Int, found: Boolean) -> Unit)
     fun clearFindInPage(tabId: String)
+    fun scrollToTop(tabId: String)
     fun exitFullScreen(tabId: String)
     fun closeSession(tabId: String)
     fun closeAllPrivateSessions()

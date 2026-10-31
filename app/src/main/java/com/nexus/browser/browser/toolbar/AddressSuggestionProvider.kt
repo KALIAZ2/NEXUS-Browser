@@ -16,6 +16,7 @@ data class AddressSuggestion(
 )
 
 enum class SuggestionSource {
+    RECENT_SEARCH,
     BOOKMARK,
     HISTORY,
     DOMAIN_AUTOCOMPLETE,
@@ -35,33 +36,97 @@ class AddressSuggestionProvider @Inject constructor() {
         "https://www.youtube.com",
         "https://www.lemonde.fr",
         "https://www.qwant.com",
-        "https://www.ecosia.org"
+        "https://www.ecosia.org",
+        "https://www.reddit.com"
     )
 
     fun computeSuggestions(
         query: String,
         bookmarks: List<BookmarkEntity>,
         history: List<HistoryEntity>,
-        maxResults: Int = 6
+        recentSearches: List<String> = emptyList(),
+        searchEngine: SearchEngine = SearchEngine.GOOGLE,
+        maxResults: Int = 7
     ): List<AddressSuggestion> {
         val trimmed = query.trim().lowercase()
-        if (trimmed.isEmpty()) return emptyList()
-
         val results = mutableListOf<AddressSuggestion>()
 
+        if (trimmed.isEmpty()) {
+            // Quand l'utilisateur ouvre la barre d'adresse vide : afficher ses recherches récentes et favoris rapides
+            recentSearches.take(4).forEach { recent ->
+                results.add(
+                    AddressSuggestion(
+                        title = recent,
+                        url = UrlUtils.normalizeInputToUrlOrSearch(recent, searchEngine),
+                        source = SuggestionSource.RECENT_SEARCH,
+                        subtitle = "Recherche récente • ${searchEngine.displayName}",
+                        urlOrQuery = recent
+                    )
+                )
+            }
+            bookmarks.take(3).forEach { bm ->
+                if (results.none { it.url == bm.url }) {
+                    results.add(
+                        AddressSuggestion(
+                            title = bm.title,
+                            url = bm.url,
+                            source = SuggestionSource.BOOKMARK,
+                            subtitle = bm.url,
+                            urlOrQuery = bm.url
+                        )
+                    )
+                }
+            }
+            return results.take(maxResults)
+        }
+
+        // 1. Recherches récentes correspondantes
+        recentSearches.filter { it.lowercase().contains(trimmed) }.take(2).forEach { recent ->
+            results.add(
+                AddressSuggestion(
+                    title = recent,
+                    url = UrlUtils.normalizeInputToUrlOrSearch(recent, searchEngine),
+                    source = SuggestionSource.RECENT_SEARCH,
+                    subtitle = "Recherche récente",
+                    urlOrQuery = recent
+                )
+            )
+        }
+
+        // 2. Favoris correspondants
         bookmarks.filter {
             it.title.lowercase().contains(trimmed) || it.url.lowercase().contains(trimmed)
         }.take(3).forEach { bm ->
-            results.add(AddressSuggestion(bm.title, bm.url, SuggestionSource.BOOKMARK))
+            if (results.none { it.url == bm.url }) {
+                results.add(
+                    AddressSuggestion(
+                        title = bm.title,
+                        url = bm.url,
+                        source = SuggestionSource.BOOKMARK,
+                        subtitle = bm.url,
+                        urlOrQuery = bm.url
+                    )
+                )
+            }
         }
 
+        // 3. Historique correspondant
         history.filter { h ->
             (h.title.lowercase().contains(trimmed) || h.url.lowercase().contains(trimmed)) &&
                 results.none { it.url == h.url }
         }.take(3).forEach { h ->
-            results.add(AddressSuggestion(h.title, h.url, SuggestionSource.HISTORY))
+            results.add(
+                AddressSuggestion(
+                    title = h.title,
+                    url = h.url,
+                    source = SuggestionSource.HISTORY,
+                    subtitle = h.url,
+                    urlOrQuery = h.url
+                )
+            )
         }
 
+        // 4. Autocomplétion de domaine
         commonDomains.filter { d ->
             d.contains(trimmed) && results.none { it.url == d }
         }.take(2).forEach { domain ->
@@ -69,7 +134,9 @@ class AddressSuggestionProvider @Inject constructor() {
                 AddressSuggestion(
                     title = domain.removePrefix("https://").removePrefix("www."),
                     url = domain,
-                    source = SuggestionSource.DOMAIN_AUTOCOMPLETE
+                    source = SuggestionSource.DOMAIN_AUTOCOMPLETE,
+                    subtitle = domain,
+                    urlOrQuery = domain
                 )
             )
         }
@@ -81,22 +148,40 @@ class AddressSuggestionProvider @Inject constructor() {
         rawQuery: String,
         searchEngine: SearchEngine = SearchEngine.GOOGLE,
         bookmarks: List<BookmarkEntity> = emptyList(),
-        history: List<HistoryEntity> = emptyList()
+        history: List<HistoryEntity> = emptyList(),
+        recentSearches: List<String> = emptyList()
     ): List<AddressSuggestion> {
         val trimmed = rawQuery.trim()
-        if (trimmed.isEmpty()) return emptyList()
+        if (trimmed.isEmpty()) {
+            return computeSuggestions(
+                query = "",
+                bookmarks = bookmarks,
+                history = history,
+                recentSearches = recentSearches,
+                searchEngine = searchEngine,
+                maxResults = 6
+            )
+        }
 
-        val list = computeSuggestions(trimmed, bookmarks, history, maxResults = 5).toMutableList()
+        val list = computeSuggestions(
+            query = trimmed,
+            bookmarks = bookmarks,
+            history = history,
+            recentSearches = recentSearches,
+            searchEngine = searchEngine,
+            maxResults = 5
+        ).toMutableList()
+
         if (UrlUtils.isLikelyUrl(trimmed)) {
             val normalized = UrlUtils.normalizeInputToUrlOrSearch(trimmed, searchEngine)
             if (list.none { it.url == normalized }) {
                 list.add(
                     0,
                     AddressSuggestion(
-                        title = "Ouvrir $normalized",
+                        title = "Aller sur $normalized",
                         url = normalized,
                         source = SuggestionSource.DIRECT_URL,
-                        subtitle = normalized,
+                        subtitle = "Adresse Web directe",
                         urlOrQuery = normalized
                     )
                 )
@@ -104,13 +189,13 @@ class AddressSuggestionProvider @Inject constructor() {
         }
         list.add(
             AddressSuggestion(
-                title = "Rechercher \"$trimmed\" avec ${searchEngine.displayName}",
+                title = "Rechercher « $trimmed »",
                 url = UrlUtils.normalizeInputToUrlOrSearch(trimmed, searchEngine),
                 source = SuggestionSource.SEARCH_ENGINE,
-                subtitle = searchEngine.displayName,
+                subtitle = "Moteur ${searchEngine.displayName}",
                 urlOrQuery = trimmed
             )
         )
-        return list.take(6)
+        return list.take(7)
     }
 }

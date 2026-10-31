@@ -94,6 +94,12 @@ class MainActivity : ComponentActivity() {
             val isBrowserFullScreen by browserViewModel.isBrowserFullScreen.collectAsState()
             val findInPageState by browserViewModel.findInPageState.collectAsState()
             val readerModeState by browserViewModel.readerModeState.collectAsState()
+            val windows by browserViewModel.windows.collectAsState()
+            val activeWindowId by browserViewModel.activeWindowId.collectAsState()
+            val tabGroups by browserViewModel.tabGroups.collectAsState()
+            val closedTabGroups by browserViewModel.closedTabGroups.collectAsState()
+            val closedWindows by browserViewModel.closedWindows.collectAsState()
+            val undoBannerMessage by browserViewModel.undoBannerMessage.collectAsState()
 
             val activeExtensionsCount = installedExtensions.count { it.enabled }
             val isVideoFullScreen = activeTab?.isFullScreen == true
@@ -148,6 +154,7 @@ class MainActivity : ComponentActivity() {
                                 activeTab = activeTab,
                                 tabCount = tabs.size,
                                 activeExtensionsCount = activeExtensionsCount,
+                                downloadsCount = downloads.size,
                                 settings = settings,
                                 suggestions = suggestions,
                                 shortcuts = shortcuts,
@@ -156,8 +163,10 @@ class MainActivity : ComponentActivity() {
                                 isBrowserFullScreen = isBrowserFullScreen,
                                 findInPageState = findInPageState,
                                 readerModeState = readerModeState,
+                                undoBannerMessage = undoBannerMessage,
                                 obtainGeckoSession = { tab -> browserViewModel.obtainGeckoSession(tab) },
                                 onAddressQueryChange = { browserViewModel.onAddressQueryChanged(it) },
+                                onAddressBarFocused = { browserViewModel.onAddressBarFocused(it) },
                                 onNavigate = { browserViewModel.navigateToInput(it) },
                                 onHomeClick = { browserViewModel.goHome() },
                                 onBackClick = { browserViewModel.goBack() },
@@ -208,7 +217,17 @@ class MainActivity : ComponentActivity() {
                                 onTranslatePage = { browserViewModel.translateCurrentPage(it) },
                                 onRestoreTranslatedPage = { browserViewModel.restoreOriginalUntranslatedPage() },
                                 onCaptureViewport = { bmp, share -> browserViewModel.saveViewportScreenshot(bmp, share) },
-                                onCaptureFullPageArticle = { share -> browserViewModel.captureFullPageArticle(share) }
+                                onCaptureFullPageArticle = { share -> browserViewModel.captureFullPageArticle(share) },
+                                onScrollToTop = { browserViewModel.scrollToTop() },
+                                onSwipeAdjacentTab = { delta -> browserViewModel.switchAdjacentTab(delta) },
+                                onPerformUndoClose = { browserViewModel.performUndoClose() },
+                                onDismissUndoBanner = { browserViewModel.dismissUndoBanner() },
+                                onCacheActiveTabPreview = { bmp -> browserViewModel.cacheTabPreview(bmp) },
+                                onSetHomeShortcutColumns = { settingsViewModel.setHomeShortcutColumns(it) },
+                                onSetHomeSections = { sc, bm, his -> settingsViewModel.setHomeSections(sc, bm, his) },
+                                onSetHomeQuickAccess = { settingsViewModel.setHomeQuickAccess(it) },
+                                onSetSearchEngine = { settingsViewModel.setSearchEngine(it) },
+                                onClearRecentSearches = { browserViewModel.clearRecentSearches() }
                             )
                         }
 
@@ -216,15 +235,38 @@ class MainActivity : ComponentActivity() {
                             TabsScreen(
                                 tabs = tabs,
                                 activeTabId = activeTabId,
+                                windows = windows,
+                                activeWindowId = activeWindowId,
+                                tabGroups = tabGroups,
+                                closedTabGroups = closedTabGroups,
+                                closedWindows = closedWindows,
                                 recentlyClosedTabs = recentlyClosedTabs,
+                                tabsLayoutMode = settings.tabsLayoutMode,
+                                undoBannerMessage = undoBannerMessage,
                                 onSelectTab = { browserViewModel.selectTab(it) },
-                                onCreateTab = { isPriv -> browserViewModel.createNewTab(isPrivate = isPriv) },
+                                onCreateTab = { isPriv, winId, gId -> browserViewModel.createNewTab(isPrivate = isPriv, windowId = winId, groupId = gId) },
                                 onDuplicateTab = { browserViewModel.duplicateTab(it) },
                                 onReorderTab = { id, up -> browserViewModel.reorderTab(id, up) },
                                 onCloseTab = { browserViewModel.closeTab(it) },
+                                onTogglePinTab = { browserViewModel.togglePinTab(it) },
                                 onCloseAllTabs = { onlyPriv -> browserViewModel.closeAllTabs(onlyPriv) },
                                 onRestoreClosedTab = { browserViewModel.restoreRecentlyClosedTab(it) },
                                 onClearClosedTabs = { browserViewModel.clearRecentlyClosedTabs() },
+                                onCreateWindow = { name, priv -> browserViewModel.createWindow(name, priv) },
+                                onRenameWindow = { id, name -> browserViewModel.renameWindow(id, name) },
+                                onSelectWindow = { browserViewModel.selectWindow(it) },
+                                onCloseWindow = { browserViewModel.closeWindow(it) },
+                                onRestoreClosedWindow = { browserViewModel.restoreClosedWindow(it) },
+                                onMoveTabToWindow = { tId, wId -> browserViewModel.moveTabToWindow(tId, wId) },
+                                onCreateTabGroup = { name, hex -> browserViewModel.createTabGroup(name, hex) },
+                                onUpdateTabGroup = { id, name, hex -> browserViewModel.updateTabGroup(id, name, hex) },
+                                onAssignTabToGroup = { tId, gId -> browserViewModel.assignTabToGroup(tId, gId) },
+                                onCloseTabGroup = { browserViewModel.closeTabGroup(it) },
+                                onRestoreClosedTabGroup = { browserViewModel.restoreClosedTabGroup(it) },
+                                onSetTabsLayoutMode = { settingsViewModel.setTabsLayoutMode(it) },
+                                onPerformUndoClose = { browserViewModel.performUndoClose() },
+                                onDismissUndoBanner = { browserViewModel.dismissUndoBanner() },
+                                loadTabPreview = { tId, pPath -> browserViewModel.getCachedTabPreview(tId, pPath) },
                                 onBack = { navController.popBackStack() }
                             )
                         }
@@ -416,9 +458,7 @@ class MainActivity : ComponentActivity() {
     private fun handleIncomingIntent(intent: Intent?) {
         if (intent?.action == Intent.ACTION_VIEW) {
             val url = intent.dataString ?: return
-            if (SecurityPolicy.isSafeNavigationUrl(url)) {
-                browserViewModel.createNewTab(url = url, isPrivate = false)
-            }
+            browserViewModel.handleExternalIntentUrl(url)
         }
     }
 }

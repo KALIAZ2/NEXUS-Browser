@@ -79,6 +79,24 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    fun setHomeQuickAccess(enabled: Boolean) {
+        viewModelScope.launch {
+            preferencesRepository.updateHomeQuickAccess(enabled)
+        }
+    }
+
+    fun setHomeShortcutColumns(columns: Int) {
+        viewModelScope.launch {
+            preferencesRepository.updateHomeShortcutColumns(columns)
+        }
+    }
+
+    fun setTabsLayoutMode(mode: String) {
+        viewModelScope.launch {
+            preferencesRepository.updateTabsLayoutMode(mode)
+        }
+    }
+
     fun setHomeBackgroundStyle(style: String, customUri: String? = null) {
         viewModelScope.launch {
             preferencesRepository.updateHomeBackgroundStyle(style, customUri)

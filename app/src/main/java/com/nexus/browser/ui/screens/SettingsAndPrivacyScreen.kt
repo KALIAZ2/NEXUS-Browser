@@ -763,6 +763,48 @@ private fun AppearanceSettingsContent(
             ) {
                 Column(modifier = Modifier.padding(14.dp)) {
                     Text(
+                        text = "Nombre de colonnes de raccourcis : ${settings.homeShortcutColumns}",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = palette.textPrimary
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf(3, 4, 5).forEach { colCount ->
+                            FilterChip(
+                                selected = settings.homeShortcutColumns == colCount,
+                                onClick = { viewModel.setHomeShortcutColumns(colCount) },
+                                label = { Text("$colCount colonnes") }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        item {
+            NexusSettingsItem(
+                title = "Afficher les cartes d'accès rapide",
+                subtitle = "Boutons directs vers vos onglets ouverts et vos téléchargements",
+                icon = Icons.Default.Home,
+                trailingContent = {
+                    Switch(
+                        checked = settings.showHomeQuickAccess,
+                        onCheckedChange = { viewModel.setHomeQuickAccess(it) }
+                    )
+                }
+            )
+        }
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                border = BorderStroke(1.dp, palette.border),
+                colors = CardDefaults.cardColors(containerColor = palette.surfaceElevated)
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Text(
                         text = "Style visuel du fond d'écran d'accueil",
                         style = MaterialTheme.typography.titleMedium,
                         color = palette.textPrimary
@@ -860,13 +902,46 @@ private fun NavigationSettingsContent(
     onReloadCurrentTab: () -> Unit,
     onToggleBrowserFullScreen: () -> Unit
 ) {
+    val palette = LocalNexusPalette.current
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
-            SettingsSectionTitle("Gestion des onglets")
+            SettingsSectionTitle("Gestion des onglets & Présentation")
+        }
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                border = BorderStroke(1.dp, palette.border),
+                colors = CardDefaults.cardColors(containerColor = palette.surfaceElevated)
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Text(
+                        text = "Mode d'affichage des onglets : ${if (settings.tabsLayoutMode == "LIST") "Liste compacte" else "Grille visuelle"}",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = palette.textPrimary
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        FilterChip(
+                            selected = settings.tabsLayoutMode == "GRID",
+                            onClick = { viewModel.setTabsLayoutMode("GRID") },
+                            label = { Text("Grille visuelle (Défaut)") }
+                        )
+                        FilterChip(
+                            selected = settings.tabsLayoutMode == "LIST",
+                            onClick = { viewModel.setTabsLayoutMode("LIST") },
+                            label = { Text("Liste compacte") }
+                        )
+                    }
+                }
+            }
         }
         item {
             NexusSettingsItem(

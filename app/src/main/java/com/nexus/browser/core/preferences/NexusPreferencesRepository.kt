@@ -38,6 +38,10 @@ data class NexusSettingsState(
     val showHomeShortcuts: Boolean = true,
     val showHomeBookmarks: Boolean = true,
     val showHomeRecentHistory: Boolean = false,
+    val showHomeQuickAccess: Boolean = true,
+    val homeShortcutColumns: Int = 4,
+    val tabsLayoutMode: String = "GRID", // GRID, LIST
+    val recentSearches: List<String> = emptyList(),
     val homeBackgroundStyle: String = "COSMIC", // COSMIC, MINIMAL, AURORA, CUSTOM
     val homeCustomBackgroundUri: String = "",
     val javaScriptEnabled: Boolean = true,
@@ -84,6 +88,10 @@ class NexusPreferencesRepository @Inject constructor(
         val SHOW_HOME_SHORTCUTS = booleanPreferencesKey("show_home_shortcuts")
         val SHOW_HOME_BOOKMARKS = booleanPreferencesKey("show_home_bookmarks")
         val SHOW_HOME_RECENT_HISTORY = booleanPreferencesKey("show_home_recent_history")
+        val SHOW_HOME_QUICK_ACCESS = booleanPreferencesKey("show_home_quick_access")
+        val HOME_SHORTCUT_COLUMNS = intPreferencesKey("home_shortcut_columns")
+        val TABS_LAYOUT_MODE = stringPreferencesKey("tabs_layout_mode")
+        val RECENT_SEARCHES_RAW = stringPreferencesKey("recent_searches_raw")
         val HOME_BACKGROUND_STYLE = stringPreferencesKey("home_background_style")
         val HOME_CUSTOM_BG_URI = stringPreferencesKey("home_custom_bg_uri")
         val JAVASCRIPT_ENABLED = booleanPreferencesKey("javascript_enabled")
@@ -131,6 +139,13 @@ class NexusPreferencesRepository @Inject constructor(
                 showHomeShortcuts = prefs[Keys.SHOW_HOME_SHORTCUTS] ?: true,
                 showHomeBookmarks = prefs[Keys.SHOW_HOME_BOOKMARKS] ?: true,
                 showHomeRecentHistory = prefs[Keys.SHOW_HOME_RECENT_HISTORY] ?: false,
+                showHomeQuickAccess = prefs[Keys.SHOW_HOME_QUICK_ACCESS] ?: true,
+                homeShortcutColumns = (prefs[Keys.HOME_SHORTCUT_COLUMNS] ?: 4).coerceIn(3, 5),
+                tabsLayoutMode = prefs[Keys.TABS_LAYOUT_MODE] ?: "GRID",
+                recentSearches = (prefs[Keys.RECENT_SEARCHES_RAW] ?: "")
+                    .split("\u001F")
+                    .map { it.trim() }
+                    .filter { it.isNotEmpty() },
                 homeBackgroundStyle = prefs[Keys.HOME_BACKGROUND_STYLE] ?: "COSMIC",
                 homeCustomBackgroundUri = prefs[Keys.HOME_CUSTOM_BG_URI] ?: "",
                 javaScriptEnabled = prefs[Keys.JAVASCRIPT_ENABLED] ?: true,
@@ -205,6 +220,43 @@ class NexusPreferencesRepository @Inject constructor(
             it[Keys.SHOW_HOME_SHORTCUTS] = shortcuts
             it[Keys.SHOW_HOME_BOOKMARKS] = bookmarks
             it[Keys.SHOW_HOME_RECENT_HISTORY] = recentHistory
+        }
+    }
+
+    suspend fun updateHomeQuickAccess(enabled: Boolean) {
+        context.nexusDataStore.edit {
+            it[Keys.SHOW_HOME_QUICK_ACCESS] = enabled
+        }
+    }
+
+    suspend fun updateHomeShortcutColumns(columns: Int) {
+        context.nexusDataStore.edit {
+            it[Keys.HOME_SHORTCUT_COLUMNS] = columns.coerceIn(3, 5)
+        }
+    }
+
+    suspend fun updateTabsLayoutMode(mode: String) {
+        context.nexusDataStore.edit {
+            it[Keys.TABS_LAYOUT_MODE] = if (mode.equals("LIST", ignoreCase = true)) "LIST" else "GRID"
+        }
+    }
+
+    suspend fun recordRecentSearch(query: String) {
+        val clean = query.trim().replace("\u001F", " ")
+        if (clean.isBlank()) return
+        context.nexusDataStore.edit { prefs ->
+            val current = (prefs[Keys.RECENT_SEARCHES_RAW] ?: "")
+                .split("\u001F")
+                .map { it.trim() }
+                .filter { it.isNotEmpty() && !it.equals(clean, ignoreCase = true) }
+            val updated = (listOf(clean) + current).take(12)
+            prefs[Keys.RECENT_SEARCHES_RAW] = updated.joinToString("\u001F")
+        }
+    }
+
+    suspend fun clearRecentSearches() {
+        context.nexusDataStore.edit {
+            it.remove(Keys.RECENT_SEARCHES_RAW)
         }
     }
 

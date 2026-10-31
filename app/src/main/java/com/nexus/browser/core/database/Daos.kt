@@ -9,10 +9,10 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface TabDao {
-    @Query("SELECT * FROM tabs WHERE isPrivate = 0 ORDER BY position ASC, lastAccessedAt DESC")
+    @Query("SELECT * FROM tabs WHERE isPrivate = 0 ORDER BY isPinned DESC, position ASC, lastAccessedAt DESC")
     fun observeNormalTabs(): Flow<List<TabEntity>>
 
-    @Query("SELECT * FROM tabs WHERE isPrivate = 0 ORDER BY position ASC, lastAccessedAt DESC")
+    @Query("SELECT * FROM tabs WHERE isPrivate = 0 ORDER BY isPinned DESC, position ASC, lastAccessedAt DESC")
     suspend fun getPersistedTabs(): List<TabEntity>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -27,8 +27,41 @@ interface TabDao {
     @Query("DELETE FROM tabs WHERE isPrivate = :isPrivate")
     suspend fun deleteAllByPrivacy(isPrivate: Boolean)
 
+    @Query("DELETE FROM tabs WHERE windowId = :windowId")
+    suspend fun deleteTabsByWindowId(windowId: String)
+
     @Query("DELETE FROM tabs")
     suspend fun clearAll()
+
+    @Query("SELECT * FROM tab_groups ORDER BY createdAt ASC")
+    suspend fun getAllTabGroups(): List<TabGroupEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertTabGroup(group: TabGroupEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertTabGroups(groups: List<TabGroupEntity>)
+
+    @Query("DELETE FROM tab_groups WHERE id = :groupId")
+    suspend fun deleteTabGroupById(groupId: String)
+
+    @Query("DELETE FROM tab_groups WHERE windowId = :windowId")
+    suspend fun deleteTabGroupsByWindowId(windowId: String)
+
+    @Query("DELETE FROM tab_groups")
+    suspend fun clearAllTabGroups()
+
+    @Query("SELECT * FROM browser_windows ORDER BY createdAt ASC")
+    suspend fun getAllWindows(): List<BrowserWindowEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertWindow(window: BrowserWindowEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertWindows(windows: List<BrowserWindowEntity>)
+
+    @Query("DELETE FROM browser_windows WHERE id = :windowId")
+    suspend fun deleteWindowById(windowId: String)
 }
 
 @Dao

@@ -8,6 +8,8 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 @Database(
     entities = [
         TabEntity::class,
+        TabGroupEntity::class,
+        BrowserWindowEntity::class,
         BookmarkEntity::class,
         HistoryEntity::class,
         HomeShortcutEntity::class,
@@ -15,7 +17,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ExtensionMetadataEntity::class,
         SitePermissionEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class NexusDatabase : RoomDatabase() {
@@ -34,6 +36,40 @@ abstract class NexusDatabase : RoomDatabase() {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("DROP TABLE IF EXISTS ai_messages")
                 db.execSQL("DELETE FROM extensions_metadata WHERE sourceType = 'AI_GENERATED'")
+            }
+        }
+
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE tabs ADD COLUMN windowId TEXT NOT NULL DEFAULT 'window_main'")
+                db.execSQL("ALTER TABLE tabs ADD COLUMN groupId TEXT")
+                db.execSQL("ALTER TABLE tabs ADD COLUMN previewPath TEXT")
+                db.execSQL("ALTER TABLE tabs ADD COLUMN isPinned INTEGER NOT NULL DEFAULT 0")
+
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS tab_groups (
+                        id TEXT NOT NULL PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        colorHex TEXT NOT NULL,
+                        windowId TEXT NOT NULL DEFAULT 'window_main',
+                        createdAt INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_tab_groups_windowId ON tab_groups(windowId)")
+
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS browser_windows (
+                        id TEXT NOT NULL PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        isPrivate INTEGER NOT NULL DEFAULT 0,
+                        createdAt INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_browser_windows_createdAt ON browser_windows(createdAt)")
             }
         }
     }
