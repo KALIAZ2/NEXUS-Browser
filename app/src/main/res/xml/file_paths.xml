@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <external-path name="external_storage" path="." />
+    <external-files-path name="nexus_downloads" path="Download/" />
+    <external-files-path name="nexus_pictures" path="Pictures/" />
+    <external-files-path name="external_files_root" path="." />
+    <files-path name="internal_downloads" path="downloads/" />
+    <files-path name="internal_root" path="." />
+    <files-path name="extensions" path="extensions/" />
+    <cache-path name="cache_files" path="." />
+</paths>

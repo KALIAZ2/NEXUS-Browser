@@ -1,0 +1,791 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NEXUS Browser — Une nouvelle façon de naviguer</title>
+    <link rel="icon" type="image/png" href="assets/nexus_logo_mark.png">
+    <style>
+        :root {
+            --bg-deep: #050816;
+            --bg-surface: #0A1024;
+            --bg-elevated: #111936;
+            --bg-card: #151E38;
+            --primary-cyan: #00E5FF;
+            --primary-blue: #2979FF;
+            --primary-violet: #7C3AED;
+            --primary-magenta: #D946EF;
+            --text-primary: #F8FAFC;
+            --text-secondary: #94A3B8;
+            --border-subtle: rgba(41, 121, 255, 0.28);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: var(--bg-deep);
+            color: var(--text-primary);
+            min-height: 100vh;
+            overflow-x: hidden;
+            position: relative;
+        }
+
+        /* Vagues cosmiques en arrière-plan fidèles à la direction artistique */
+        .cosmic-backdrop {
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            z-index: 0;
+            overflow: hidden;
+            background:
+                radial-gradient(circle at 14% 18%, rgba(0, 229, 255, 0.16) 0%, rgba(41, 121, 255, 0.08) 28%, transparent 58%),
+                radial-gradient(circle at 86% 22%, rgba(124, 58, 237, 0.24) 0%, rgba(41, 121, 255, 0.10) 35%, transparent 65%),
+                radial-gradient(circle at 75% 88%, rgba(217, 70, 239, 0.22) 0%, rgba(41, 121, 255, 0.14) 38%, transparent 68%),
+                linear-gradient(145deg, #040714 0%, #070C22 50%, #050816 100%);
+        }
+
+        .cosmic-wave-bottom {
+            position: fixed;
+            bottom: -140px;
+            left: -10%;
+            width: 120%;
+            height: 360px;
+            background: linear-gradient(90deg, rgba(0, 229, 255, 0.18), rgba(41, 121, 255, 0.30), rgba(124, 58, 237, 0.28));
+            filter: blur(55px);
+            border-radius: 50%;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .container {
+            position: relative;
+            z-index: 1;
+            max-width: 1320px;
+            margin: 0 auto;
+            padding: 36px 28px 72px;
+        }
+
+        /* Barre de navigation supérieure du site */
+        header.site-nav {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding-bottom: 36px;
+        }
+
+        .brand-inline {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            text-decoration: none;
+            color: var(--text-primary);
+        }
+
+        .brand-inline img {
+            width: 44px;
+            height: 44px;
+            object-fit: contain;
+            filter: drop-shadow(0 4px 16px rgba(0, 229, 255, 0.35));
+        }
+
+        .brand-inline .wordmark {
+            font-size: 1.25rem;
+            font-weight: 700;
+            letter-spacing: 0.32em;
+        }
+
+        .nav-actions {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+
+        .btn-apk {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            padding: 11px 22px;
+            border-radius: 999px;
+            font-weight: 600;
+            font-size: 0.95rem;
+            text-decoration: none;
+            color: #fff;
+            background: linear-gradient(135deg, var(--primary-cyan) 0%, var(--primary-blue) 50%, var(--primary-violet) 100%);
+            box-shadow: 0 8px 28px rgba(41, 121, 255, 0.38);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .btn-apk:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 12px 34px rgba(0, 229, 255, 0.48);
+        }
+
+        /* Section Héro principale : Colonne Gauche (Identité & Piliers) + Colonne Droite (3 Smartphones) */
+        .hero-grid {
+            display: grid;
+            grid-template-columns: 1fr 1.35fr;
+            gap: 48px;
+            align-items: center;
+            margin-top: 12px;
+        }
+
+        .hero-left {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+        }
+
+        .hero-logo {
+            width: 156px;
+            height: auto;
+            object-fit: contain;
+            filter: drop-shadow(0 14px 32px rgba(41, 121, 255, 0.45));
+            margin-bottom: 14px;
+        }
+
+        .hero-wordmark {
+            font-size: 3.1rem;
+            font-weight: 700;
+            letter-spacing: 0.24em;
+            margin-right: -0.24em;
+            color: #FFFFFF;
+            line-height: 1.1;
+        }
+
+        .hero-subwordmark {
+            font-size: 1rem;
+            font-weight: 500;
+            letter-spacing: 0.65em;
+            margin-right: -0.65em;
+            color: #CBD5E1;
+            margin-top: 6px;
+            margin-bottom: 28px;
+        }
+
+        .hero-tagline {
+            font-size: 2.35rem;
+            font-weight: 400;
+            line-height: 1.22;
+            color: #F8FAFC;
+            margin-bottom: 32px;
+        }
+
+        .hero-tagline .gradient-text {
+            font-weight: 700;
+            background: linear-gradient(90deg, #00E5FF 0%, #3B82F6 48%, #A855F7 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        /* Grille 3x2 des 6 piliers de la direction artistique */
+        .pillars-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px 28px;
+            width: 100%;
+            max-width: 420px;
+            margin-bottom: 34px;
+        }
+
+        .pillar-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .pillar-icon-box {
+            width: 54px;
+            height: 54px;
+            border-radius: 15px;
+            background: rgba(17, 25, 54, 0.82);
+            border: 1px solid rgba(59, 130, 246, 0.32);
+            box-shadow: inset 0 0 16px rgba(41, 121, 255, 0.14);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #E2E8F0;
+            transition: transform 0.2s ease, border-color 0.2s ease;
+        }
+
+        .pillar-item:hover .pillar-icon-box {
+            transform: translateY(-3px);
+            border-color: var(--primary-cyan);
+        }
+
+        .pillar-label {
+            font-size: 0.88rem;
+            color: #E2E8F0;
+            font-weight: 500;
+        }
+
+        /* Boutons store & téléchargement APK */
+        .cta-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 14px;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .google-play-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px 22px;
+            background: #04060E;
+            border: 1.5px solid rgba(148, 163, 184, 0.45);
+            border-radius: 12px;
+            text-decoration: none;
+            color: #fff;
+            transition: border-color 0.2s ease, transform 0.2s ease;
+        }
+
+        .google-play-badge:hover {
+            border-color: var(--primary-cyan);
+            transform: translateY(-2px);
+        }
+
+        .gp-text-small {
+            display: block;
+            font-size: 0.72rem;
+            color: #CBD5E1;
+            text-align: left;
+        }
+
+        .gp-text-large {
+            display: block;
+            font-size: 1.15rem;
+            font-weight: 600;
+            color: #FFFFFF;
+            text-align: left;
+        }
+
+        /* Mockups des 3 écrans Android à droite */
+        .phones-stage {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 20px;
+            perspective: 1200px;
+        }
+
+        .phone-frame {
+            width: 258px;
+            height: 528px;
+            background: #060918;
+            border-radius: 36px;
+            border: 3px solid #2A3659;
+            box-shadow: 0 26px 60px rgba(0, 0, 0, 0.65), 0 0 40px rgba(41, 121, 255, 0.18);
+            padding: 14px 14px 12px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .phone-frame.phone-home {
+            width: 274px;
+            height: 556px;
+            border-color: #3B82F6;
+            background:
+                radial-gradient(circle at 85% 22%, rgba(41, 121, 255, 0.28), transparent 48%),
+                radial-gradient(circle at 50% 82%, rgba(124, 58, 237, 0.35), rgba(0, 229, 255, 0.18) 42%, transparent 70%),
+                #050816;
+            z-index: 3;
+        }
+
+        .phone-frame.phone-tabs {
+            background: #080D1F;
+            z-index: 2;
+        }
+
+        .phone-frame.phone-menu {
+            background: #080D1F;
+            z-index: 1;
+        }
+
+        .status-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.72rem;
+            font-weight: 600;
+            color: #E2E8F0;
+            padding: 2px 6px 8px;
+        }
+
+        .camera-dot {
+            width: 10px;
+            height: 10px;
+            background: #000;
+            border-radius: 50%;
+        }
+
+        /* Contenu Phone 1 : Accueil */
+        .p1-center {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin-top: 24px;
+            flex: 1;
+        }
+
+        .p1-logo {
+            width: 78px;
+            height: auto;
+            margin-bottom: 8px;
+        }
+
+        .p1-wordmark {
+            font-size: 1.05rem;
+            font-weight: 700;
+            letter-spacing: 0.28em;
+            margin-right: -0.28em;
+            margin-bottom: 24px;
+        }
+
+        .p1-search {
+            width: 100%;
+            padding: 11px 14px;
+            border-radius: 999px;
+            background: rgba(21, 30, 56, 0.88);
+            border: 1px solid rgba(148, 163, 184, 0.22);
+            color: #94A3B8;
+            font-size: 0.76rem;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 24px;
+        }
+
+        .p1-shortcuts {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+            width: 100%;
+        }
+
+        .shortcut-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
+            text-decoration: none;
+        }
+
+        .shortcut-badge {
+            width: 44px;
+            height: 44px;
+            border-radius: 12px;
+            background: #FFFFFF;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 800;
+            font-size: 1.15rem;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+
+        .shortcut-name {
+            font-size: 0.66rem;
+            color: #E2E8F0;
+        }
+
+        .p1-bottom-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 10px 4px;
+            border-top: 1px solid rgba(148, 163, 184, 0.14);
+            color: #E2E8F0;
+            font-size: 1rem;
+        }
+
+        .tab-count-badge {
+            width: 20px;
+            height: 20px;
+            border: 1.6px solid #E2E8F0;
+            border-radius: 5px;
+            font-size: 0.68rem;
+            font-weight: 700;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* Contenu Phone 2 : Onglets */
+        .p2-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 6px 4px 14px;
+            font-size: 1.1rem;
+            font-weight: 700;
+        }
+
+        .p2-cards {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            flex: 1;
+        }
+
+        .tab-card-cosmic {
+            height: 78px;
+            border-radius: 14px;
+            border: 1.5px solid #2979FF;
+            background: radial-gradient(circle at 80% 80%, rgba(124, 58, 237, 0.45), #060B1E 70%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .tab-card-web {
+            padding: 14px 12px;
+            border-radius: 14px;
+            background: #F1F5F9;
+            color: #0F172A;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-weight: 600;
+            font-size: 0.9rem;
+        }
+
+        .tab-card-web-left {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .p2-footer {
+            display: flex;
+            justify-content: center;
+            padding-top: 10px;
+        }
+
+        .pill-close-all {
+            padding: 7px 18px;
+            border-radius: 999px;
+            background: #151E38;
+            border: 1px solid rgba(148, 163, 184, 0.25);
+            font-size: 0.75rem;
+            color: #E2E8F0;
+        }
+
+        /* Contenu Phone 3 : Menu */
+        .p3-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 4px 18px;
+        }
+
+        .p3-menu-list {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            flex: 1;
+            padding: 4px 6px;
+            font-size: 0.84rem;
+            color: #E2E8F0;
+        }
+
+        .p3-menu-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .p3-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 6px 4px;
+            border-top: 1px solid rgba(148, 163, 184, 0.16);
+            font-size: 0.82rem;
+        }
+
+        .switch-pill {
+            width: 38px;
+            height: 20px;
+            background: #2979FF;
+            border-radius: 999px;
+            position: relative;
+        }
+
+        .switch-pill::after {
+            content: "";
+            width: 16px;
+            height: 16px;
+            background: #FFF;
+            border-radius: 50%;
+            position: absolute;
+            top: 2px;
+            right: 2px;
+        }
+
+        /* Galerie de la charte graphique & Logos */
+        .brand-showcase-section {
+            margin-top: 72px;
+            padding: 36px;
+            border-radius: 24px;
+            background: rgba(10, 16, 36, 0.78);
+            border: 1px solid var(--border-subtle);
+            text-align: center;
+        }
+
+        .brand-showcase-section h2 {
+            font-size: 1.5rem;
+            margin-bottom: 10px;
+        }
+
+        .brand-showcase-section p {
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+            margin-bottom: 24px;
+        }
+
+        .brand-images-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+            align-items: center;
+        }
+
+        .brand-images-grid img {
+            width: 100%;
+            border-radius: 16px;
+            border: 1px solid rgba(148, 163, 184, 0.2);
+            box-shadow: 0 14px 36px rgba(0, 0, 0, 0.45);
+        }
+
+        @media (max-width: 1080px) {
+            .hero-grid {
+                grid-template-columns: 1fr;
+            }
+            .phones-stage {
+                flex-wrap: wrap;
+            }
+            .brand-images-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="cosmic-backdrop"></div>
+    <div class="cosmic-wave-bottom"></div>
+
+    <div class="container">
+        <header class="site-nav">
+            <a href="#" class="brand-inline">
+                <img src="assets/nexus_logo_mark.png" alt="Logo NEXUS Browser">
+                <span class="wordmark">N&#926;XUS</span>
+            </a>
+            <div class="nav-actions">
+                <a href="../NEXUS.apk" class="btn-apk" download>
+                    <span>&#11015; Télécharger NEXUS.apk</span>
+                </a>
+            </div>
+        </header>
+
+        <main class="hero-grid">
+            <!-- Colonne gauche : Identité NEXUS Browser + 6 piliers + Google Play -->
+            <section class="hero-left">
+                <img src="assets/nexus_logo_mark.png" alt="NEXUS Ribbon N" class="hero-logo">
+                <h1 class="hero-wordmark">N&#926;XUS</h1>
+                <div class="hero-subwordmark">BROWSER</div>
+
+                <h2 class="hero-tagline">
+                    Une nouvelle façon<br>
+                    de <span class="gradient-text">naviguer.</span>
+                </h2>
+
+                <div class="pillars-grid">
+                    <div class="pillar-item">
+                        <div class="pillar-icon-box" title="Moteur Mozilla GeckoView ultra-rapide">&#9889;</div>
+                        <span class="pillar-label">Rapide</span>
+                    </div>
+                    <div class="pillar-item">
+                        <div class="pillar-icon-box" title="Protection anti-pistage & HTTPS">&#128737;</div>
+                        <span class="pillar-label">Sécurisé</span>
+                    </div>
+                    <div class="pillar-item">
+                        <div class="pillar-icon-box" title="Support natif des WebExtensions .xpi">&#129513;</div>
+                        <span class="pillar-label">Extensions</span>
+                    </div>
+                    <div class="pillar-item">
+                        <div class="pillar-icon-box" title="Interface épurée utilisable à une main">&#128241;</div>
+                        <span class="pillar-label">Minimaliste</span>
+                    </div>
+                    <div class="pillar-item">
+                        <div class="pillar-icon-box" title="Thèmes, raccourcis et barre d'adresse configurables">&#9881;</div>
+                        <span class="pillar-label">Personnalisable</span>
+                    </div>
+                    <div class="pillar-item">
+                        <div class="pillar-icon-box" title="Gestion fluide des onglets, favoris et APK">&#128260;</div>
+                        <span class="pillar-label">Synchronisé</span>
+                    </div>
+                </div>
+
+                <div class="cta-row">
+                    <a href="../NEXUS.apk" class="google-play-badge" download>
+                        <svg width="26" height="28" viewBox="0 0 24 24" fill="none">
+                            <path d="M3 2.5L13.8 12L3 21.5V2.5Z" fill="#00E5FF"/>
+                            <path d="M13.8 12L17.8 8L5.2 1.2L13.8 12Z" fill="#10B981"/>
+                            <path d="M13.8 12L5.2 22.8L17.8 16L13.8 12Z" fill="#F43F5E"/>
+                            <path d="M17.8 8L21.2 10C22.1 10.5 22.1 13.5 21.2 14L17.8 16L13.8 12L17.8 8Z" fill="#F59E0B"/>
+                        </svg>
+                        <span>
+                            <span class="gp-text-small">Disponible sur</span>
+                            <span class="gp-text-large">Google Play &amp; APK</span>
+                        </span>
+                    </a>
+                </div>
+            </section>
+
+            <!-- Colonne droite : Les 3 écrans clés de NEXUS Browser -->
+            <section class="phones-stage">
+                <!-- Smartphone 1 : Écran d'accueil -->
+                <div class="phone-frame phone-home">
+                    <div class="status-bar">
+                        <span>9:41</span>
+                        <span class="camera-dot"></span>
+                        <span>5G &#128267;</span>
+                    </div>
+
+                    <div class="p1-center">
+                        <img src="assets/nexus_logo_mark.png" alt="NEXUS" class="p1-logo">
+                        <div class="p1-wordmark">N&#926;XUS</div>
+
+                        <div class="p1-search">
+                            <span>&#128269;</span>
+                            <span>Rechercher ou saisir une URL</span>
+                        </div>
+
+                        <div class="p1-shortcuts">
+                            <div class="shortcut-item">
+                                <div class="shortcut-badge" style="color:#4285F4;">G</div>
+                                <span class="shortcut-name">Google</span>
+                            </div>
+                            <div class="shortcut-item">
+                                <div class="shortcut-badge" style="color:#FF0000;">&#9654;</div>
+                                <span class="shortcut-name">YouTube</span>
+                            </div>
+                            <div class="shortcut-item">
+                                <div class="shortcut-badge" style="color:#181717;">GH</div>
+                                <span class="shortcut-name">GitHub</span>
+                            </div>
+                            <div class="shortcut-item">
+                                <div class="shortcut-badge" style="color:#111827; font-family: Georgia, serif;">W</div>
+                                <span class="shortcut-name">Wikipedia</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="p1-bottom-bar">
+                        <span>&#8592;</span>
+                        <span style="opacity:0.45;">&#8594;</span>
+                        <span>&#8962;</span>
+                        <span class="tab-count-badge">1</span>
+                        <span>&#9776;</span>
+                    </div>
+                </div>
+
+                <!-- Smartphone 2 : Gestionnaire d'onglets -->
+                <div class="phone-frame phone-tabs">
+                    <div class="status-bar">
+                        <span>9:41</span>
+                        <span class="camera-dot"></span>
+                        <span>5G &#128267;</span>
+                    </div>
+
+                    <div class="p2-header">
+                        <span>Onglets</span>
+                        <span>+</span>
+                    </div>
+
+                    <div class="p2-cards">
+                        <div class="tab-card-cosmic">
+                            <img src="assets/nexus_logo_mark.png" alt="NEXUS" style="width:32px;">
+                            <span style="font-weight:700; letter-spacing:0.2em; font-size:0.8rem;">N&#926;XUS</span>
+                        </div>
+
+                        <div class="tab-card-web">
+                            <div class="tab-card-web-left">
+                                <span style="color:#4285F4; font-weight:800; font-size:1.2rem;">G</span>
+                                <span>Google</span>
+                            </div>
+                            <span>&#10005;</span>
+                        </div>
+
+                        <div class="tab-card-web">
+                            <div class="tab-card-web-left">
+                                <span style="font-family: Georgia, serif; font-weight:800; font-size:1.1rem;">W</span>
+                                <span>Wikipedia</span>
+                            </div>
+                            <span>&#10005;</span>
+                        </div>
+                    </div>
+
+                    <div class="p2-footer">
+                        <span class="pill-close-all">Tout fermer</span>
+                    </div>
+                </div>
+
+                <!-- Smartphone 3 : Menu latéral / Bottom Sheet -->
+                <div class="phone-frame phone-menu">
+                    <div class="status-bar">
+                        <span>9:41</span>
+                        <span class="camera-dot"></span>
+                        <span>5G &#128267;</span>
+                    </div>
+
+                    <div class="p3-header">
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            <img src="assets/nexus_logo_mark.png" alt="NEXUS" style="width:28px;">
+                            <span style="font-weight:700; letter-spacing:0.2em; font-size:0.82rem;">N&#926;XUS</span>
+                        </div>
+                        <span style="color:#94A3B8;">&#10005;</span>
+                    </div>
+
+                    <div class="p3-menu-list">
+                        <div class="p3-menu-row"><span>&#8862;</span><span>Nouvel onglet</span></div>
+                        <div class="p3-menu-row"><span>&#9734;</span><span>Favoris</span></div>
+                        <div class="p3-menu-row"><span>&#128337;</span><span>Historique</span></div>
+                        <div class="p3-menu-row"><span>&#129513;</span><span>Extensions</span></div>
+                        <div class="p3-menu-row"><span>&#11015;</span><span>Téléchargements &amp; APK</span></div>
+                        <div class="p3-menu-row"><span>&#9881;</span><span>Paramètres</span></div>
+                        <div class="p3-menu-row"><span>&#10067;</span><span>Aide &amp; Confidentialité</span></div>
+                    </div>
+
+                    <div class="p3-footer">
+                        <span>Mode sombre</span>
+                        <div class="switch-pill"></div>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- Section Charte Graphique Officielle -->
+        <section class="brand-showcase-section">
+            <h2>Direction Artistique &amp; Logos Officiels NEXUS Browser</h2>
+            <p>Identité visuelle intégrée nativement dans l'application Android et ses icônes adaptatives.</p>
+            <div class="brand-images-grid">
+                <img src="assets/nexus_showcase.png" alt="Présentation officielle NEXUS Browser">
+                <img src="assets/nexus_brand_icons.png" alt="Déclinaisons du logo NEXUS Browser">
+            </div>
+        </section>
+    </div>
+</body>
+</html>

@@ -1,0 +1,30 @@
+# Fichiers de compilation Android & Gradle
+.gradle/
+build/
+app/build/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Configuration locale et secrets (NE JAMAIS VERSIONNER)
+local.properties
+*.keystore
+*.jks
+keystore/
+.env
+*.env
+*secret*
+
+# Binaires APK / AAB générés localement
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# Fichiers IDE Android Studio / IntelliJ
+.idea/
+*.iml
+*.ipr
+*.iws
+.DS_Store
+Thumbs.db

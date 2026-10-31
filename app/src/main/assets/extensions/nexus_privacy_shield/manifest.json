@@ -1,0 +1,24 @@
+{
+  "manifest_version": 2,
+  "name": "NEXUS Privacy Shield & Anti-Bannières",
+  "version": "1.1.0",
+  "description": "Supprime les paramètres de pistage dans les liens (utm, fbclid, gclid) et masque les bannières intrusives.",
+  "author": "NEXUS Security",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "privacy-shield@nexus.browser",
+      "strict_min_version": "100.0"
+    }
+  },
+  "permissions": [
+    "activeTab",
+    "<all_urls>"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["shield.js"],
+      "run_at": "document_start"
+    }
+  ]
+}

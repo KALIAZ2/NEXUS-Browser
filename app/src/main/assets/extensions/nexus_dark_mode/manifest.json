@@ -1,0 +1,24 @@
+{
+  "manifest_version": 2,
+  "name": "NEXUS Dark Mode Pro",
+  "version": "1.2.0",
+  "description": "Applique automatiquement un thème sombre adaptatif et reposant aux pages web claires.",
+  "author": "NEXUS Team",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "dark-reader-lite@nexus.browser",
+      "strict_min_version": "100.0"
+    }
+  },
+  "permissions": [
+    "activeTab",
+    "<all_urls>"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

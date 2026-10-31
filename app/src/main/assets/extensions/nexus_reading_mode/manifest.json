@@ -1,0 +1,23 @@
+{
+  "manifest_version": 2,
+  "name": "NEXUS Mobile Typography & Confort",
+  "version": "1.0.4",
+  "description": "Améliore la lisibilité mobile, le défilement fluide et l'affichage des blocs de code.",
+  "author": "NEXUS Design",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "reading-enhancer@nexus.browser",
+      "strict_min_version": "100.0"
+    }
+  },
+  "permissions": [
+    "activeTab"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["reader.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
